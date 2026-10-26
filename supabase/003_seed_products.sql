@@ -71,3 +71,6 @@ cross join (values
        expedited_shipping_cents, expedited_delivery_days,
        image_file, featured, sort_order)
 where m.name = 'Northwind Outfitters';
+
+-- Added after the first run (applied directly in Supabase, Amendment 2 section 6.6):
+-- update products set marketing_blurb = 'Easy returns. Directional twin all-mountain and freestyle board with a soft flex.' where image_file = 'burton-spellbinder.png';

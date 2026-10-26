@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/*
+  Two separate themes live in this app.
+
+  STORE (this file's body defaults): light retail theme. White page, dark text, plain
+  product cards. Store components use only Tailwind's neutral palette (slate / emerald).
+
+  DASHBOARD (later, not built yet): dark theme only. These tokens are reserved for it and
+  must NOT be used by anything under src/components/ (a test enforces that).
+*/
+@theme {
+  --color-dash-page-top: #0a1128;
+  --color-dash-page-bottom: #0b0f1a;
+  --color-dash-card: #16233a;
+  --color-dash-card-raised: #1e2a44;
+  --color-dash-edge: #26365e;
+  --color-dash-ink: #ffffff;
+  --color-dash-body: #cbd5e1;
+  --color-dash-label: #94a3b8;
+  --color-dash-teal: #2dd4bf;
+  --color-dash-violation: #f87171;
+  --color-dash-attention: #fbbf24;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 6rem;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #ffffff;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

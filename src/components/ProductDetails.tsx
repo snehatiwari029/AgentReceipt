@@ -73,7 +73,7 @@ export default function ProductDetails({ product, onClose, onAdd }: Props) {
               {product.name}
             </h2>
             <p className="mt-1 text-sm text-slate-700">
-              {product.size_cm}cm · {product.colour}
+              {product.size_cm}cm{product.colour ? ` · ${product.colour}` : ""}
             </p>
           </div>
           <button

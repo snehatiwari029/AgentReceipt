@@ -31,7 +31,7 @@ export default function ProductCard({ product, onView, onAdd }: Props) {
           )}
           <h3 className="mt-1 text-lg font-semibold leading-snug text-slate-900">{product.name}</h3>
           <p className="mt-1 text-sm text-slate-700">
-            {product.size_cm}cm · {product.colour}
+            {product.size_cm}cm{product.colour ? ` · ${product.colour}` : ""}
           </p>
         </div>
 

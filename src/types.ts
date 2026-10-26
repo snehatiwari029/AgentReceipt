@@ -8,10 +8,18 @@ export type Product = {
   brand: string | null
   category: 'snowboard' | 'ski'
   size_cm: number
-  colour: string
+  colour: string | null
+  gender: string | null
+  style: string | null
+  details: string | null
+  mrp_cents: number | null
+  discount_pct: number | null
   price_cents: number
   currency: string
   image_url: string | null
+  image_file: string | null
+  image_id: string | null
+  image_hash: string | null
   marketing_blurb: string | null
   formal_returns: ReturnsTerm
   formal_terms_text: string

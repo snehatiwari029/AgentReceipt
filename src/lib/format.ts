@@ -39,6 +39,7 @@ const SWATCH: Record<string, string> = {
 }
 
 // "Black/Red" -> ["#0f172a", "#ef4444"]. Unknown colour names fall back to a neutral tone.
-export function swatchColours(colour: string): string[] {
+export function swatchColours(colour: string | null): string[] {
+  if (!colour) return ['#94a3b8']
   return colour.split('/').map((part) => SWATCH[part.trim().toLowerCase()] ?? '#64748b')
 }

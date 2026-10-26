@@ -9,7 +9,7 @@ export default function ProductImage({ product, className = '' }: { product: Pro
     return (
       <img
         src={product.image_url}
-        alt={`${product.name}, ${product.colour}`}
+        alt={product.brand ? `${product.brand} ${product.name}` : product.name}
         loading="lazy"
         className={`h-full w-full object-cover ${className}`}
       />

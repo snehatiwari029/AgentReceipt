@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Decision, Dispute, DisputeEvent, Grant, Receipt } from '../../shared/schemas'
+import type { Decision, Dispute, DisputeEvent, Grant, MismatchResult, Receipt } from '../../shared/schemas'
 import { formatMoney } from '../../shared/format'
 import { num, str, useRows, type Rows } from '../data'
 import { disputeStatus } from '../status'
@@ -16,7 +16,7 @@ type Session = {
   opened_at: string
 }
 
-type OrderRow = {
+export type OrderRow = {
   key: string
   order: string | null
   receipt: Receipt | null
@@ -88,30 +88,46 @@ const suspicion = (r: Receipt): string[] => {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 
-export default function AgentOrders() {
+// One live read of everything an order row needs. The dashboard home uses it too, so its count can never drift from this page.
+export function useAgentOrders(): Rows<OrderRow> {
   const receipts = useRows<Receipt>('receipts', 'chain_seq', true)
   const grants = useRows<Grant>('grants', 'chain_seq', true)
   const disputes = useRows<Dispute>('disputes', 'opened_at', true)
   const events = useRows<DisputeEvent>('dispute_events', 'chain_seq', true)
   const sessions = useRows<Session>('sessions', 'opened_at', true)
-  const [open, setOpen] = useState<string | null>(null)
-
   const all: Rows<unknown>[] = [receipts, grants, disputes, events, sessions]
   const failed = all.find((s) => s.status === 'error')
-  const state: Rows<OrderRow> = failed
-    ? (failed as Rows<OrderRow>)
-    : all.some((s) => s.status === 'loading')
-      ? { status: 'loading' }
-      : {
-          status: 'ready',
-          rows: buildOrders(
-            (receipts as { rows: Receipt[] }).rows,
-            (grants as { rows: Grant[] }).rows,
-            (disputes as { rows: Dispute[] }).rows,
-            (events as { rows: DisputeEvent[] }).rows,
-            (sessions as { rows: Session[] }).rows,
-          ),
-        }
+  if (failed) return failed as Rows<OrderRow>
+  if (all.some((s) => s.status === 'loading')) return { status: 'loading' }
+  return {
+    status: 'ready',
+    rows: buildOrders(
+      (receipts as { rows: Receipt[] }).rows,
+      (grants as { rows: Grant[] }).rows,
+      (disputes as { rows: Dispute[] }).rows,
+      (events as { rows: DisputeEvent[] }).rows,
+      (sessions as { rows: Session[] }).rows,
+    ),
+  }
+}
+
+// Display only: the Product row names the actual product (from the receipt's own terms snapshot) with the scope in
+// brackets. Stored results, totals, problems and decisions are not touched.
+export function withProductName(rows: MismatchResult[], snapshot: Record<string, unknown> | null | undefined): MismatchResult[] {
+  const brand = str(snapshot?.brand)
+  const name = str(snapshot?.product_name)
+  if (!name) return rows
+  const full = brand && !name.toLowerCase().startsWith(brand.toLowerCase()) ? `${brand} ${name}` : name
+  return rows.map((r) => {
+    if (r.key !== 'product') return r
+    const scope = r.merchant_terms ?? r.actual
+    return { ...r, actual: scope ? `${full} (${scope})` : full }
+  })
+}
+
+export default function AgentOrders() {
+  const state = useAgentOrders()
+  const [open, setOpen] = useState<string | null>(null)
 
   return (
     <div>
@@ -207,7 +223,7 @@ export default function AgentOrders() {
                       {suspicion(r).length > 0 && (
                         <p className="mb-3 text-sm text-dash-violation">Why the record is not trusted: {suspicion(r).join('; ')}.</p>
                       )}
-                      <VerdictTable rows={r.mismatch_results} />
+                      <VerdictTable rows={withProductName(r.mismatch_results, r.terms_snapshot)} />
                       {r.missing_components.length > 0 && (
                         <p className="mt-3 text-sm text-dash-attention">
                           Missing record components: {r.missing_components.join(', ')}.

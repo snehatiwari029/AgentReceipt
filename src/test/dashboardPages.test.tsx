@@ -96,6 +96,43 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(screen.getByText(/VI-aligned demo representation/)).toBeInTheDocument()
   })
 
+  it('Home shows the 4 stat cards in one row; Orders requiring attention is live (Review Required + Hold for Suspicion only) and links to the orders page', async () => {
+    open('/dashboard')
+    const card = await screen.findByTestId('stat-attention')
+    expect(card).toHaveAttribute('href', '/dashboard/orders')
+    // seed: 12322 Review Required + 14522 Hold for Suspicion. Pass orders 13422 and 0041 are not counted.
+    await vi.waitFor(() => expect(card).toHaveTextContent(/^Orders requiring attention2/))
+    expect(screen.getByTestId('stat-store-health')).toHaveTextContent('86/100')
+    expect(screen.getByTestId('stat-profit')).toHaveTextContent('$18,400')
+    expect(screen.getByTestId('stat-agent-profit')).toHaveTextContent('$7,920 (43%)')
+    const row = screen.getByRole('region', { name: 'Store summary' })
+    expect(row.children).toHaveLength(4)
+    expect(row.className).toMatch(/lg:grid-cols-4/)
+  })
+
+  it('Home count follows the data: a second Review Required order makes it 3', async () => {
+    const extra = (SEEDED.receipts.data as Receipt[]).find((r) => r.receipt_ref === 'AR-2026-0042')!
+    mock.tables = { ...SEEDED, receipts: { data: [...(SEEDED.receipts.data as Receipt[]), { ...extra, id: 'extra-1', receipt_ref: 'AR-2026-0044', order_ref: '15001', chain_seq: 99 }], error: null } }
+    open('/dashboard')
+    await vi.waitFor(() => expect(screen.getByTestId('stat-attention')).toHaveTextContent(/^Orders requiring attention3/))
+  })
+
+  it('Agent orders: the Product row names the actual product with the scope in brackets (display only)', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/orders')
+    const hero = (await screen.findByText('12322')).closest('tr')!
+    await user.click(within(hero).getByRole('button', { name: /show check/i }))
+    expect(screen.getByText('Burton Spellbinder Snowboard 2026/2027 (snowboard)')).toBeInTheDocument()
+    expect(within(hero).getByText('Review Required')).toBeInTheDocument()
+    expect(screen.getByText('2 problems found', { exact: false })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /hide check/i }))
+    const orca = screen.getByText('13422').closest('tr')!
+    await user.click(within(orca).getByRole('button', { name: /show check/i }))
+    expect(screen.getByText('Lib Tech T. Rice Orca Snowboard 2025/2026 (snowboard)')).toBeInTheDocument()
+    expect(within(orca).getByText('Pass')).toBeInTheDocument()
+    expect(within(orca).getByText('$489.83')).toBeInTheDocument()
+  })
+
   it('Disputes shows only the separate Orca order 13422 (won, clean receipt); the Review Required hero is not a dispute', async () => {
     open('/dashboard/disputes')
     expect(await screen.findByText('AR-2026-0043')).toBeInTheDocument()

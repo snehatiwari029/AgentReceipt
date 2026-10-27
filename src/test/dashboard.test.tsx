@@ -20,6 +20,8 @@ beforeEach(() => {
   sessionStorage.clear()
   mock.hang = false
   mock.next = { data: NINE, error: null }
+  // The home cards also read the order tables; they are empty here (products stay the fallback for everything else).
+  mock.tables = Object.fromEntries(['receipts', 'grants', 'disputes', 'dispute_events', 'sessions'].map((t) => [t, { data: [], error: null }]))
 })
 
 describe('Dashboard and routing', () => {

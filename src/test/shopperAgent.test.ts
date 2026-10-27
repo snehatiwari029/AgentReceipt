@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handle, type AgentReply, type Deps, type ProductRow, type Step, type Store } from '../../supabase/functions/shopper-agent/agent'
+import { handle, rulesFromDraft, rulesFromModel, type AgentReply, type Deps, type ProductRow, type Step, type Store } from '../../supabase/functions/shopper-agent/agent'
 import { appendChained, type ChainDb } from '../../supabase/functions/shopper-agent/chain'
 import { createMetaClient, META_CHAT_URL, MODEL_NAME, type ChatMessage, type ModelClient, type ModelReply } from '../../supabase/functions/shopper-agent/model'
 import { verifyChain, type ChainRecord } from '../shared/chain'
@@ -92,11 +92,12 @@ const orderTurn = (m: ReturnType<typeof memoryStore>, first: Extract<AgentReply,
     deps(fakeModel([() => call('place_order', args)]).model, m.store))
 
 describe('shopper-agent: first reply', () => {
-  it('records the rules in the conversation, shows two cards and asks only for payment, and stores nothing yet', async () => {
+  it('records the rules in the conversation, shows two cards and asks the customer to pick (no payment question yet), and stores nothing yet', async () => {
     const m = memoryStore()
     const { r, script } = await firstTurn(m)
     expect(r.text).toBe('Looking for snowboards under $500 that arrive by Friday and that you can return. Here are two options from Northwind:')
-    expect(r.follow_up).toBe('Which payment should I use for this demo checkout? No real charge will be made.')
+    expect(r.follow_up).toBe("Pick one and I'll place the order.")
+    expect(r.ask_payment).toBe(false)
     expect(r.offers.map((o) => [o.name, o.price_cents, o.summary, o.delivery_label])).toEqual([
       ['Spellbinder Snowboard 2026/2027', 44995, 'Easy returns', 'Fri Oct 30'],
       ['T. Rice Orca Snowboard 2025/2026', 48983, 'Free returns', 'Thu Oct 29'],
@@ -308,5 +309,14 @@ describe('Meta Model API client', () => {
     const fake = (async () => new Response('nope', { status: 401 })) as unknown as typeof fetch
     await expect(createMetaClient('secret-key-123', fake).complete([], [])).rejects.toThrow(/401/)
     await createMetaClient('secret-key-123', fake).complete([], []).catch((e: Error) => expect(e.message).not.toContain('secret-key-123'))
+  })
+})
+
+describe('shopper-agent: rules written as the word "null"', () => {
+  it('treats "null", "none" and "n/a" as not mentioned, never as a colour or product', () => {
+    const r = rulesFromModel({ budget_max_dollars: 500, colour_preference: 'null', product_scope: 'None', delivery_by: null }, '2026-10-26')
+    expect(r.colour_preference).toBeNull()
+    expect(r.product_scope).toBeNull()
+    expect(rulesFromDraft({ colour_preference: 'n/a', product_scope: 'snowboard' })?.colour_preference).toBeNull()
   })
 })

@@ -169,6 +169,12 @@ const clean = (v: unknown, max: number): string | null => {
   return s ? s.slice(0, max) : null
 }
 
+// A model sometimes writes the word "null" (or "none", "n/a") instead of a real null. That is "not mentioned", never a value.
+const cleanOpt = (v: unknown, max: number): string | null => {
+  const s = clean(v, max)
+  return s && !/^(null|none|n\/a|na|undefined|not specified|not mentioned|any|no preference)$/i.test(s) ? s : null
+}
+
 const toNum = (v: unknown): number | null => {
   if (typeof v === 'number' && Number.isFinite(v)) return v
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v)
@@ -204,10 +210,10 @@ export function rulesFromModel(args: Record<string, unknown>, todayDate: string)
     budget_max_cents: dollars !== null && dollars > 0 ? Math.round(dollars * 100) : null,
     size_min_cm: posInt(args.size_min_cm),
     size_max_cm: posInt(args.size_max_cm),
-    colour_preference: clean(args.colour_preference, 40),
+    colour_preference: cleanOpt(args.colour_preference, 40),
     delivery_by: validDate(by) && by >= todayDate ? by : null,
     return_policy_required: args.return_policy_required === true ? true : null,
-    product_scope: clean(args.product_scope, 60),
+    product_scope: cleanOpt(args.product_scope, 60),
   })
 }
 
@@ -220,10 +226,10 @@ export function rulesFromDraft(raw: unknown): Rules | null {
     budget_max_cents: cents,
     size_min_cm: posInt(d.size_min_cm),
     size_max_cm: posInt(d.size_max_cm),
-    colour_preference: clean(d.colour_preference, 40),
+    colour_preference: cleanOpt(d.colour_preference, 40),
     delivery_by: validDate(d.delivery_by) ? d.delivery_by : null,
     return_policy_required: d.return_policy_required === true ? true : null,
-    product_scope: clean(d.product_scope, 60),
+    product_scope: cleanOpt(d.product_scope, 60),
   })
   return rules
 }
@@ -570,9 +576,9 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       }
       if (offers.length === 0) return { result: { error: 'Offer at least one product.' } }
       const text = clean(args.message, 300) ?? 'Here are my picks from Northwind:'
-      const asked = args.payment_stated !== true
-      const follow_up = asked ? ASK_PAYMENT : "Pick one and I'll place the order."
-      return { result: { ok: true, shown: offers.length }, done: { type: 'proposals', text, offers, follow_up, ask_payment: asked } }
+      // The customer picks first. Payment is asked only after a pick, so tapping a payment can never choose the product.
+      const follow_up = "Pick one and I'll place the order."
+      return { result: { ok: true, shown: offers.length }, done: { type: 'proposals', text, offers, follow_up, ask_payment: false } }
     }
     if (name === 'place_order') {
       const pid = typeof args.product_id === 'string' ? args.product_id : ''

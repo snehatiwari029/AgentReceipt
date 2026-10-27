@@ -5,11 +5,21 @@ import type { ChatMessage, ModelClient, ToolDef } from './model.ts'
 
 export const AGENT_ID = 'meta-muse-j0376672'
 export const MERCHANT_NAME = 'Northwind Outfitters'
-export const PAYMENT_LABEL = 'Demo PayPal'
-// Demo only: whatever payment the customer names is accepted and shown as a simulated "Demo ..." payment.
-export function paymentLabel(said: string): string {
-  return /paypal/i.test(said) ? PAYMENT_LABEL : `Demo ${said}`
+// Demo only. Every payment the customer names is accepted and recorded as a simulated "Demo Checkout".
+// Visa and Mastercard are card networks, not checkout methods, so they are only ever called "Visa card" / "Mastercard".
+export const PAYMENT_REF = 'Demo Checkout'
+export const ASK_PAYMENT = 'Which payment should I use for this demo checkout? No real charge will be made.'
+export const NUMBER_WITHHELD = 'Card (number not stored)'
+export function paymentDetail(said: string): string {
+  const s = said.replace(/\s+/g, ' ').trim()
+  if (/4242/.test(s)) return 'Demo Visa card ••4242'
+  if (/stripe/i.test(s)) return 'Stripe Checkout'
+  if (/paypal/i.test(s)) return 'PayPal'
+  if (/^master\s*card\b/i.test(s)) return 'Mastercard'
+  if ((s.match(/\d/g) ?? []).length >= 5) return NUMBER_WITHHELD // never keep a full card or account number
+  return s
 }
+export const paymentLabel = (detail: string) => `${PAYMENT_REF} — ${detail}`
 export const SCHEMA_LABEL = 'VI-aligned demo representation'
 export const MAX_MESSAGES = 40
 export const MAX_TEXT = 1000
@@ -44,7 +54,6 @@ export type Rules = {
   delivery_by: string | null
   return_policy_required: boolean | null
   product_scope: string | null
-  payment_method_ref: string
 }
 
 export type Shipping = 'standard' | 'expedited'
@@ -76,7 +85,7 @@ export type OrderView = {
   payment_label: string
 }
 
-export type AgentReply = { session_id?: string; steps?: string[]; draft?: Rules } & (
+export type AgentReply = { session_id?: string; steps?: string[]; draft?: Rules; ask_payment?: boolean } & (
   | { type: 'message'; text: string }
   | { type: 'proposals'; text: string; offers: Offer[]; follow_up: string }
   | { type: 'ordered'; text: string; order: OrderView }
@@ -179,10 +188,10 @@ function parseArgs(text: string): Record<string, unknown> {
 }
 
 // ---------- rules ----------
-function finishRules(r: Omit<Rules, 'merchant' | 'payment_method_ref'>): Rules {
+function finishRules(r: Omit<Rules, 'merchant'>): Rules {
   let { size_min_cm, size_max_cm } = r
   if (size_min_cm !== null && size_max_cm !== null && size_min_cm > size_max_cm) [size_min_cm, size_max_cm] = [size_max_cm, size_min_cm]
-  return { merchant: MERCHANT_NAME, ...r, size_min_cm, size_max_cm, payment_method_ref: PAYMENT_LABEL }
+  return { merchant: MERCHANT_NAME, ...r, size_min_cm, size_max_cm }
 }
 
 // From the model's tool arguments (budget in dollars). Unmentioned or invalid = null, never false.
@@ -348,7 +357,7 @@ const TOOLS: ToolDef[] = [
         type: 'object',
         properties: {
           product_id: { type: 'string' },
-          payment_method: { type: ['string', 'null'], description: 'What the customer said they will pay with, e.g. "PayPal". null if they have not said.' },
+          payment_method: { type: ['string', 'null'], description: 'Exactly what the customer said they will pay with, in their words (e.g. "PayPal", "Mastercard", "Apple Pay"). null if they have not said. Never refuse a payment.' },
           why,
         },
         required: ['product_id', 'payment_method', 'why'],
@@ -378,7 +387,7 @@ function prompt(t: string, rules: Rules | null, offers: Offer[]): string {
     'Then call propose_products with one or two options. For each option choose the shipping method and write a short summary of the return situation from the product page text. The customer sees item price, your summary and the delivery day on each card.',
     "The 'message' of propose_products must be ONE friendly sentence that restates only what the customer told you (for example budget, arrival day, returns) and then introduces the options. Never mention anything they did not say. Never write 'null', 'not specified' or a list of fields.",
     'Do not ask about colour, size, delivery, returns or anything else the customer did not mention. Only if product selection is impossible without it.',
-    'The customer\'s reply that picks an option and says how they will pay IS their confirmation (any payment method they name is fine, this is a demo). Then call place_order with that product and the payment they named. If they pick an option but have not said how they will pay, ask only which payment to charge.',
+    'The customer\'s reply that picks an option and says how they will pay IS their confirmation (any payment they name is fine and a typed one is never refused, this is a demo with no real charge). Then call place_order with that product and the payment they named. If they pick an option but have not said how they will pay, call place_order with payment_method null: the store asks for the payment itself, once. If they give a payment but have not picked an option, ask only which option. Never ask for payment again once they have told you. Never refuse a payment or say you cannot check out with it.',
     shown,
     "Every tool call needs a short plain-words 'why' that the customer will see. Do not invent details the tools did not give you. Keep messages short.",
   ].join('\n')
@@ -445,7 +454,7 @@ async function runLoop(
 }
 
 // ---------- one conversation turn ----------
-async function openSession(deps: Deps, req: AgentRequest, rules: Rules) {
+async function openSession(deps: Deps, req: AgentRequest, rules: Rules, payDetail: string) {
   const { store } = deps
   const sessionId = deps.newId()
   const merchant = await store.merchantId()
@@ -463,17 +472,21 @@ async function openSession(deps: Deps, req: AgentRequest, rules: Rules) {
   await store.logStep(sessionId, 'intent_captured', { fields: rules }, false)
   await store.logStep(sessionId, 'intent_hash_recorded', { private_chat_hash, note: 'Hash only. The chat text is not stored.' }, false)
 
+  // grant_json seals the payment detail too. The grants table keeps only payment_method_ref, so no new column
+  // is added (a new column would change the recomputed hash of every existing record).
   const sealed = {
     shopper_ref: 'Demo customer', agent_id: AGENT_ID, agent_verified: true, merchant_id: merchant,
     product_scope: rules.product_scope, size_min_cm: rules.size_min_cm, size_max_cm: rules.size_max_cm,
     colour_preference: rules.colour_preference, currency: 'USD',
     amount_max_cents: rules.budget_max_cents, budget_limit_cents: rules.budget_max_cents,
-    payment_method_ref: rules.payment_method_ref, shipping_method: null, shipping_max_cost_cents: null,
+    payment_method_ref: PAYMENT_REF, payment_method_detail: payDetail, payment_simulated: true,
+    shipping_method: null, shipping_max_cost_cents: null,
     delivery_by: rules.delivery_by, return_policy_required: rules.return_policy_required, confirmed_at, expires_at,
   }
   const grantId = deps.newId()
+  const { payment_method_detail: _detail, payment_simulated: _simulated, ...columns } = sealed
   await store.addGrant({
-    id: grantId, session_id: sessionId, version: 1, supersedes_grant_id: null, ...sealed,
+    id: grantId, session_id: sessionId, version: 1, supersedes_grant_id: null, ...columns,
     private_chat_hash, grant_json: JSON.parse(canonicalJson(sealed)),
     system_metadata: { data_sharing_limits: 'grant fields only, this purchase only', checked: false, priority: 'P1' },
     schema_label: SCHEMA_LABEL,
@@ -555,8 +568,9 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       }
       if (offers.length === 0) return { result: { error: 'Offer at least one product.' } }
       const text = clean(args.message, 300) ?? 'Here are my picks from Northwind:'
-      const follow_up = args.payment_stated === true ? "Pick one and I'll place the order." : 'Pick one, and tell me which payment to charge.'
-      return { result: { ok: true, shown: offers.length }, done: { type: 'proposals', text, offers, follow_up } }
+      const asked = args.payment_stated !== true
+      const follow_up = asked ? ASK_PAYMENT : "Pick one and I'll place the order."
+      return { result: { ok: true, shown: offers.length }, done: { type: 'proposals', text, offers, follow_up, ask_payment: asked } }
     }
     if (name === 'place_order') {
       const pid = typeof args.product_id === 'string' ? args.product_id : ''
@@ -564,13 +578,14 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       const p = byId.get(pid)
       if (!offer || !p) return { result: { error: 'The customer has not been shown that option yet. Propose it first.' } }
       const pay = clean(args.payment_method, 40)
-      if (!pay) return { result: { error: 'The customer has not said how they will pay. Ask only which payment to charge.' } }
-      if (/\d{4}/.test(pay)) return { result: { error: 'Do not take card or account numbers. Ask the customer to just name the payment method.' } }
-      const payLabel = paymentLabel(pay)
+      // No payment named yet: the server asks once, in fixed words, and the phone shows the payment buttons.
+      if (!pay) return { result: { ok: true, asked_customer_for_payment: true }, done: { type: 'message', text: ASK_PAYMENT, ask_payment: true } }
+      const payDetail = paymentDetail(pay)
+      const payLabel = paymentLabel(payDetail)
       const pd = priceAndDelivery(p, offer.shipping_method, t)
       if (!pd) return { result: { error: 'That shipping method is not available.' } }
 
-      const { sessionId, grantId } = await openSession(deps, req, { ...(ctx.rules ?? emptyRules()), payment_method_ref: payLabel })
+      const { sessionId, grantId } = await openSession(deps, req, { ...(ctx.rules ?? emptyRules()) }, payDetail)
       const confirmed_at = deps.now().toISOString()
       const proposalId = deps.newId()
       await store.addProposal({
@@ -581,7 +596,8 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       const detail = {
         product_id: p.id, product_name: p.name, brand: p.brand, size_cm: p.size_cm, colour: p.colour,
         item_price_cents: p.price_cents, shipping_method: offer.shipping_method, shipping_cents: pd.shipping_cents,
-        total_cents: pd.total_cents, delivery_date: pd.delivery_date, payment_method: payLabel,
+        total_cents: pd.total_cents, delivery_date: pd.delivery_date,
+        payment_method: PAYMENT_REF, payment_method_detail: payDetail, payment_simulated: true,
         agent_summary: { returns: offer.summary },
       }
       const seq = await store.addAction(grantId, 'checkout', detail, { returns: offer.summary })

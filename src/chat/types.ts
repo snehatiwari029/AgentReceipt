@@ -23,7 +23,7 @@ export type OrderData = {
   payment_label: string
 }
 
-export type AgentReply = { session_id?: string; steps?: string[]; draft?: unknown } & (
+export type AgentReply = { session_id?: string; steps?: string[]; draft?: unknown; ask_payment?: boolean } & (
   | { type: 'message'; text: string }
   | { type: 'proposals'; text: string; follow_up: string; offers: (OfferCardData & Record<string, unknown>)[] }
   | { type: 'ordered'; text: string; order: OrderData }

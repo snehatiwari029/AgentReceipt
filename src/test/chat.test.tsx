@@ -55,7 +55,7 @@ describe('/chat phone screen', () => {
     const rules = { budget_max_cents: 50000, delivery_by: '2026-10-30' }
     replies = [
       { type: 'proposals', text: 'Looking for snowboards under $500 that will arrive by Friday and that you can return. Here are two options from Northwind:', follow_up: 'Pick one, and tell me which payment to charge.', offers, draft: rules, steps: ['Muse is checking: Looking at snowboards'] },
-      { type: 'ordered', session_id: 's-1', text: 'Your order is placed.', order: { product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_label: 'Expedited shipping', shipping_cents: 6000, total_cents: 50995, delivery_label: 'Fri Oct 30', payment_label: 'Demo PayPal' } },
+      { type: 'ordered', session_id: 's-1', text: 'Your order is placed.', order: { product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_label: 'Expedited shipping', shipping_cents: 6000, total_cents: 50995, delivery_label: 'Fri Oct 30', payment_label: 'Demo Checkout — PayPal' } },
     ]
     render(<ChatApp />)
     await user.type(screen.getByLabelText('Message Muse'), HERO)
@@ -84,7 +84,7 @@ describe('/chat phone screen', () => {
     expect(order).toHaveTextContent('$60')
     expect(order).toHaveTextContent('$509.95')
     expect(order).toHaveTextContent('Arrives Fri Oct 30')
-    expect(order).toHaveTextContent('Paid with Demo PayPal')
+    expect(order).toHaveTextContent('Paid with Demo Checkout — PayPal. Simulated, no real payment.')
     expect(screen.getByLabelText('Message Muse')).toBeDisabled()
 
     // only the shopper-agent function, publishable key only, no confirm step
@@ -100,6 +100,46 @@ describe('/chat phone screen', () => {
 
     expect(screen.getByTestId('phone-frame').textContent).not.toMatch(/dashboard|grant|receipt|tamper|dispute|verdict/i)
     expect(screen.queryAllByRole('link')).toHaveLength(0)
+  })
+
+  it.each([
+    ['Demo Visa card ••4242', 'Demo Visa card ••4242'],
+    ['Mastercard', 'Mastercard'],
+    ['Stripe Checkout', 'Stripe Checkout'],
+    ['PayPal', 'PayPal'],
+  ])('shows payment buttons once, and tapping "%s" places the order with matching wording', async (label, detail) => {
+    const user = userEvent.setup()
+    const ask = 'Which payment should I use for this demo checkout? No real charge will be made.'
+    replies = [
+      { type: 'proposals', text: 'Here are two options:', follow_up: ask, ask_payment: true, offers, draft: {} },
+      { type: 'ordered', session_id: 's-1', text: 'Your order is placed.', order: { product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_label: 'Expedited shipping', shipping_cents: 6000, total_cents: 50995, delivery_label: 'Wed Oct 28', payment_label: `Demo Checkout — ${detail}` } },
+    ]
+    render(<ChatApp />)
+    await user.type(screen.getByLabelText('Message Muse'), HERO)
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    const options = await screen.findByLabelText('Payment options')
+    const names = Array.from(options.querySelectorAll('button')).map((b) => b.textContent)
+    expect(names).toEqual(['Demo Visa card ••4242Suggested', 'Mastercard', 'Stripe Checkout', 'PayPal'])
+    expect(options).toHaveTextContent("Or type any other payment — I'll record it as demo checkout.")
+    expect(screen.getByText(ask)).toBeInTheDocument()
+    expect(screen.getByTestId('phone-frame').textContent).not.toMatch(/visa checkout|mastercard checkout/i)
+    await user.click(screen.getByRole('button', { name: new RegExp(label) }))
+    const order = await screen.findByLabelText('Order confirmation')
+    expect(order).toHaveTextContent(`Paid with Demo Checkout — ${detail}. Simulated, no real payment.`)
+    expect(calls[1].body.messages.at(-1)).toEqual({ role: 'user', text: `Pay with ${label}.` })
+    expect(screen.queryByLabelText('Payment options')).toBeNull()
+  })
+
+  it('a typed payment such as Apple Pay is sent as typed, and the options are not shown when payment was already told', async () => {
+    const user = userEvent.setup()
+    replies = [
+      { type: 'proposals', text: 'Here are two options:', follow_up: "Pick one and I'll place the order.", ask_payment: false, offers, draft: {} },
+    ]
+    render(<ChatApp />)
+    await user.type(screen.getByLabelText('Message Muse'), HERO)
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await screen.findByLabelText('Spellbinder Snowboard 2026/2027')
+    expect(screen.queryByLabelText('Payment options')).toBeNull()
   })
 
   it('sends a plain message when a card is picked', async () => {

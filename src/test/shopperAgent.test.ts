@@ -96,14 +96,14 @@ describe('shopper-agent: first reply', () => {
     const m = memoryStore()
     const { r, script } = await firstTurn(m)
     expect(r.text).toBe('Looking for snowboards under $500 that arrive by Friday and that you can return. Here are two options from Northwind:')
-    expect(r.follow_up).toBe('Pick one, and tell me which payment to charge.')
+    expect(r.follow_up).toBe('Which payment should I use for this demo checkout? No real charge will be made.')
     expect(r.offers.map((o) => [o.name, o.price_cents, o.summary, o.delivery_label])).toEqual([
       ['Spellbinder Snowboard 2026/2027', 44995, 'Easy returns', 'Fri Oct 30'],
       ['T. Rice Orca Snowboard 2025/2026', 48983, 'Free returns', 'Thu Oct 29'],
     ])
     // offers carry no total
     expect(JSON.stringify(r.offers)).not.toMatch(/total|50995|formal/i)
-    expect(r.draft).toMatchObject({ budget_max_cents: 50000, size_min_cm: 150, size_max_cm: 165, delivery_by: '2026-10-30', return_policy_required: true, colour_preference: null, payment_method_ref: 'Demo PayPal' })
+    expect(r.draft).toMatchObject({ budget_max_cents: 50000, size_min_cm: 150, size_max_cm: 165, delivery_by: '2026-10-30', return_policy_required: true, colour_preference: null })
     expect(r.steps).toHaveLength(3)
     // no form-style fields in the reply, and nothing written
     expect(JSON.stringify({ text: r.text, follow_up: r.follow_up })).not.toMatch(/null|not specified/i)
@@ -182,14 +182,14 @@ describe('shopper-agent: the order reply is the confirmation', () => {
     const m = memoryStore()
     const { r: first } = await firstTurn(m)
     const r3 = await asOk(orderTurn(m, first, { product_id: BURTON, payment_method: 'PayPal', why: 'Placing your order' }), 'ordered')
-    expect(r3.order).toMatchObject({ product_name: 'Spellbinder Snowboard 2026/2027', colour: 'Serpent', size_cm: 156, item_price_cents: 44995, shipping_cents: 6000, total_cents: 50995, delivery_label: 'Fri Oct 30', payment_label: 'Demo PayPal' })
+    expect(r3.order).toMatchObject({ product_name: 'Spellbinder Snowboard 2026/2027', colour: 'Serpent', size_cm: 156, item_price_cents: 44995, shipping_cents: 6000, total_cents: 50995, delivery_label: 'Fri Oct 30', payment_label: 'Demo Checkout — PayPal' })
 
     expect(m.tables.session_events.map((e) => e.step)).toEqual(['verified_agent_detected', 'session_started', 'intent_captured', 'intent_hash_recorded', 'grant_captured', 'order_received'])
     expect(m.tables.session_events[0]).toMatchObject({ simulated: true, detail: { agent_id: 'meta-muse-j0376672', agent_verified: true, label: 'simulated' } })
     expect(m.tables.sessions[0]).toMatchObject({ agent_id: 'meta-muse-j0376672', agent_verified: true, agent_verified_simulated: true })
 
     const grant = m.tables.grants[0]
-    expect(grant).toMatchObject({ amount_max_cents: 50000, budget_limit_cents: 50000, size_min_cm: 150, size_max_cm: 165, delivery_by: '2026-10-30', return_policy_required: true, payment_method_ref: 'Demo PayPal', colour_preference: null, shipping_method: null })
+    expect(grant).toMatchObject({ amount_max_cents: 50000, budget_limit_cents: 50000, size_min_cm: 150, size_max_cm: 165, delivery_by: '2026-10-30', return_policy_required: true, payment_method_ref: 'Demo Checkout', colour_preference: null, shipping_method: null })
     expect(JSON.stringify(m.tables)).not.toContain('weekend trip')
     expect(String(grant.private_chat_hash)).toMatch(/^sha256:[0-9a-f]{64}$/)
 
@@ -212,31 +212,42 @@ describe('shopper-agent: the order reply is the confirmation', () => {
     expect(r.order.total_cents).toBeGreaterThan(50000)
   })
 
-  it('writes nothing and does not order when the customer has not said how they will pay', async () => {
+  it('asks for the payment once, in fixed words, and writes nothing, when the customer has not said how to pay', async () => {
     const m = memoryStore()
     const { r: first } = await firstTurn(m)
-    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: null, why: 'x' }), () => ({ content: 'Which payment should I charge?' })])
+    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: null, why: 'x' })])
     const r = await asOk(handle({ messages: [{ role: 'user', text: HERO }, { role: 'user', text: "I'll take the Burton." }], draft: first.draft, offers: first.offers }, deps(script.model, m.store)), 'message')
-    expect(r.text).toContain('payment')
+    expect(r.text).toBe('Which payment should I use for this demo checkout? No real charge will be made.')
+    expect(r.ask_payment).toBe(true)
     expect(Object.values(m.tables).every((t) => t.length === 0)).toBe(true)
   })
 
-  it('accepts whatever payment the customer names (demo only) and records it as a simulated payment', async () => {
+  it.each([
+    ['Demo Visa card ••4242', 'Demo Visa card ••4242'],
+    ['Mastercard', 'Mastercard'],
+    ['Stripe Checkout', 'Stripe Checkout'],
+    ['PayPal', 'PayPal'],
+    ['Apple Pay', 'Apple Pay'],
+    ['stripe', 'Stripe Checkout'],
+  ])('accepts "%s" and records it as a simulated Demo Checkout', async (said, detail) => {
     const m = memoryStore()
     const { r: first } = await firstTurn(m)
-    const r = await asOk(orderTurn(m, first, { product_id: BURTON, payment_method: 'Apple Pay', why: 'x' }, 'Burton please, pay with Apple Pay'), 'ordered')
-    expect(r.order.payment_label).toBe('Demo Apple Pay')
-    expect(m.tables.grants[0].payment_method_ref).toBe('Demo Apple Pay')
-    expect(m.tables.actions.find((a) => a.type === 'checkout')!.detail).toMatchObject({ payment_method: 'Demo Apple Pay' })
+    const r = await asOk(orderTurn(m, first, { product_id: BURTON, payment_method: said, why: 'x' }, `Burton please, pay with ${said}`), 'ordered')
+    expect(r.order.payment_label).toBe(`Demo Checkout — ${detail}`)
+    const grant = m.tables.grants[0]
+    expect(grant.payment_method_ref).toBe('Demo Checkout')
+    expect(grant.grant_json).toMatchObject({ payment_method_ref: 'Demo Checkout', payment_method_detail: detail, payment_simulated: true })
+    expect(Object.keys(grant)).not.toContain('payment_method_detail')
+    expect(m.tables.actions.find((a) => a.type === 'checkout')!.detail).toMatchObject({ payment_method: 'Demo Checkout', payment_method_detail: detail, payment_simulated: true })
+    expect(JSON.stringify(m.tables)).not.toMatch(/visa checkout|mastercard checkout/i)
   })
 
-  it('does not take card numbers', async () => {
+  it('never keeps a card number: it is accepted but only "number not stored" is recorded', async () => {
     const m = memoryStore()
     const { r: first } = await firstTurn(m)
-    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: 'card 4111 1111 1111 1111', why: 'x' }), () => ({ content: 'Just tell me the payment method, no numbers.' })])
-    const r = await asOk(handle({ messages: [{ role: 'user', text: 'x' }], draft: first.draft, offers: first.offers }, deps(script.model, m.store)), 'message')
-    expect(r.text).toContain('no numbers')
-    expect(m.tables.grants).toHaveLength(0)
+    const r = await asOk(orderTurn(m, first, { product_id: BURTON, payment_method: 'card 4111 1111 1111 1111', why: 'x' }, 'pay with card 4111 1111 1111 1111'), 'ordered')
+    expect(r.order.payment_label).toBe('Demo Checkout — Card (number not stored)')
+    expect(JSON.stringify(m.tables)).not.toContain('4111')
   })
 
   it('refuses an option the customer was never shown, and does not write', async () => {

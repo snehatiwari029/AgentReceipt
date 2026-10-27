@@ -91,13 +91,13 @@ async function build(s: Scenario) {
   const sealed = {
     shopper_ref: s.shopper, agent_id: s.agent, agent_verified: true, merchant_id: MERCHANT_ID,
     product_scope: s.grant.product_scope, size_min_cm: 150, size_max_cm: 165, colour_preference: s.grant.colour,
-    currency: 'USD', amount_max_cents: 50000, budget_limit_cents: 50000, payment_method_ref: 'Demo PayPal',
+    currency: 'USD', amount_max_cents: 50000, budget_limit_cents: 50000, payment_method_ref: 'Demo Checkout',
     shipping_method: null, shipping_max_cost_cents: null, delivery_by: s.grant.delivery_by,
     return_policy_required: s.grant.return_required, confirmed_at: confirmed, expires_at: expires,
   }
   await chain('grants', 'grant', {
     id: gid, session_id: sid, version: 1, supersedes_grant_id: null, ...sealed,
-    private_chat_hash: chatHash(s.key), grant_json: JSON.parse(canonicalJson(sealed)),
+    private_chat_hash: chatHash(s.key), grant_json: JSON.parse(canonicalJson({ ...sealed, payment_method_detail: 'PayPal', payment_simulated: true })),
     system_metadata: {
       data_sharing_limits: 'grant fields only, this purchase only', checked: false, priority: 'P1',
       seeded_demo: true, private_chat_hash_note: 'Seeded demo row: no private chat exists, the hash is of a fixed label.',
@@ -147,11 +147,11 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     grant: { product_scope: 'snowboard', colour: null, return_required: null, delivery_by: null },
     proposal: { product: BURTON_ID, item: 44995, total: 44995, returns: 'Final sale', delivery: 'Standard, 5 days' },
     action: {
-      detail: { product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'standard', shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-31', payment_method: 'Demo PayPal', agent_summary: { returns: 'Final sale' } },
+      detail: { product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'standard', shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-31', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Final sale' } },
       believed: { returns: 'Final sale' },
     },
     terms: burtonTerms,
-    summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'standard', shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-31', payment_method: 'Demo PayPal' },
+    summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'standard', shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-31', payment_method: 'Demo Checkout — PayPal' },
     verdict: [
       mm('Budget', '$500.00 max', 'Item $449.95, standard shipping free', '$449.95 total', 'match', null, null, ['amount_max_cents', 'budget_limit_cents']),
       mm('Size', '150-165cm', '156cm', '156cm', 'match', null, null, ['size_min_cm', 'size_max_cm']),
@@ -160,7 +160,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
       mm('Delivery', null, 'Standard 5 days', 'Sat 31 Oct 2026', 'unspecified', null, null, ['delivery_by']),
       mm('Shipping method', null, 'Standard free, expedited $60.00', 'Standard', 'unspecified', null, null, ['shipping_method']),
       mm('Merchant', 'Northwind Outfitters only', 'Northwind Outfitters', 'Northwind Outfitters', 'match', null, null, ['merchant_id']),
-      mm('Payment method', 'Demo PayPal', 'Demo PayPal', 'Demo PayPal', 'match', null, null, ['payment_method_ref']),
+      mm('Payment method', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'match', null, null, ['payment_method_ref']),
     ],
     recommendation: 'represent',
   })
@@ -172,11 +172,11 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     grant: { product_scope: 'snowboard', colour: 'Serpent', return_required: true, delivery_by: '2026-10-30' },
     proposal: { product: BURTON_ID, item: 44995, total: null, returns: 'Easy returns', delivery: 'Friday' },
     action: {
-      detail: { product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', payment_method: 'Demo PayPal', agent_summary: { returns: 'Easy returns' } },
+      detail: { product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Easy returns' } },
       believed: { returns: 'Easy returns' },
     },
     terms: burtonTerms,
-    summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', payment_method: 'Demo PayPal', agent_summary_returns: 'Easy returns' },
+    summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Easy returns' },
     verdict: [
       mm('Budget', '$500.00 max', 'Item $449.95 + expedited $60.00', '$509.95 total', 'mismatch', 'Agent treated the cap as item-only', 'Merchant: concede the dispute', ['amount_max_cents', 'budget_limit_cents']),
       mm('Returns', 'Returnable required', 'Final sale', 'Agent summary "Easy returns"', 'mismatch', 'Agent summary "Easy returns" misrepresented the formal final-sale terms', 'Merchant: concede the dispute', ['return_policy_required']),
@@ -185,7 +185,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
       mm('Delivery', 'By Fri 30 Oct 2026', 'Expedited 4 days, standard 5 days', 'Fri 30 Oct 2026 (expedited)', 'match', null, null, ['delivery_by']),
       mm('Shipping method', null, 'Standard free, expedited $60.00', 'Expedited', 'unspecified', null, null, ['shipping_method']),
       mm('Merchant', 'Northwind Outfitters only', 'Northwind Outfitters', 'Northwind Outfitters', 'match', null, null, ['merchant_id']),
-      mm('Payment method', 'Demo PayPal', 'Demo PayPal', 'Demo PayPal', 'match', null, null, ['payment_method_ref']),
+      mm('Payment method', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'match', null, null, ['payment_method_ref']),
     ],
     recommendation: 'concede',
   })
@@ -200,11 +200,11 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     grant: { product_scope: null, colour: null, return_required: true, delivery_by: '2026-10-30' },
     proposal: { product: ORCA_ID, item: 48983, total: 48983, returns: 'Free returns', delivery: 'Friday' },
     action: {
-      detail: { product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo PayPal', agent_summary: { returns: 'Free returns' } },
+      detail: { product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Free returns' } },
       believed: { returns: 'Free returns' },
     },
     terms: orcaTerms,
-    summary: { order_status: 'Confirmed', product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo PayPal', agent_summary_returns: 'Free returns' },
+    summary: { order_status: 'Confirmed', product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Free returns' },
     verdict: [
       mm('Budget', '$500.00 max', 'Item $489.83, standard shipping free', '$489.83 total', 'match', null, null, ['amount_max_cents', 'budget_limit_cents']),
       mm('Returns', 'Returnable required', 'Free returns within 30 days', 'Agent summary "Free returns"', 'match', null, null, ['return_policy_required']),
@@ -213,7 +213,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
       mm('Delivery', 'By Fri 30 Oct 2026', 'Standard 3 days', 'Thu 29 Oct 2026 (standard)', 'match', null, null, ['delivery_by']),
       mm('Shipping method', null, 'Standard free', 'Standard, no expedited charge', 'unspecified', null, null, ['shipping_method']),
       mm('Merchant', 'Northwind Outfitters only', 'Northwind Outfitters', 'Northwind Outfitters', 'match', null, null, ['merchant_id']),
-      mm('Payment method', 'Demo PayPal', 'Demo PayPal', 'Demo PayPal', 'match', null, null, ['payment_method_ref']),
+      mm('Payment method', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'match', null, null, ['payment_method_ref']),
     ],
     recommendation: 'represent',
   })
@@ -276,7 +276,7 @@ function emitSql(): string {
 --
 -- Rows: orders 12322 (AR-2026-0042, hero, dispute received), 13422 (AR-2026-0043, Scenario B,
 -- merchant represents and wins), 14522 (gap, no receipt), and the tamper example receipt
--- AR-2026-0041 ($449.95). Customers are demo names only. Payment label: Demo PayPal.
+-- AR-2026-0041 ($449.95). Customers are demo names only. Payment: Demo Checkout — PayPal (simulated).
 -- Hashes: supabase/functions/_shared/hash.ts, chained from the origin hash. Seeded demo data:
 -- no real chat exists, so private_chat_hash is a hash of a fixed label.
 -- To re-seed: select demo_reset();  (this clears ALL sessions, grants, receipts and disputes)

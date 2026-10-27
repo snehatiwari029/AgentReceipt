@@ -8,7 +8,7 @@
 --
 -- Rows: orders 12322 (AR-2026-0042, hero, dispute received), 13422 (AR-2026-0043, Scenario B,
 -- merchant represents and wins), 14522 (gap, no receipt), and the tamper example receipt
--- AR-2026-0041 ($449.95). Customers are demo names only. Payment label: Demo PayPal.
+-- AR-2026-0041 ($449.95). Customers are demo names only. Payment: Demo Checkout — PayPal (simulated).
 -- Hashes: supabase/functions/_shared/hash.ts, chained from the origin hash. Seeded demo data:
 -- no real chat exists, so private_chat_hash is a hash of a fixed label.
 -- To re-seed: select demo_reset();  (this clears ALL sessions, grants, receipts and disputes)
@@ -99,7 +99,7 @@ insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, a
   'USD',
   50000,
   50000,
-  'Demo PayPal',
+  'Demo Checkout',
   null,
   null,
   null,
@@ -107,13 +107,13 @@ insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, a
   '2026-10-26T13:00:00.000Z'::timestamptz,
   '2026-10-27T13:00:00.000Z'::timestamptz,
   'sha256:3d29d9834520fc95a2d1c76bda55021b1d9721ecb6043438669f7bef48b8afc5',
-  '{"agent_id":"instinct-kk14680","agent_verified":true,"amount_max_cents":50000,"budget_limit_cents":50000,"colour_preference":null,"confirmed_at":"2026-10-26T13:00:00.000Z","currency":"USD","delivery_by":null,"expires_at":"2026-10-27T13:00:00.000Z","merchant_id":"32b14be6-26e6-49df-a7af-79532f910510","payment_method_ref":"Demo PayPal","product_scope":"snowboard","return_policy_required":null,"shipping_max_cost_cents":null,"shipping_method":null,"shopper_ref":"Ivan Dijkstra","size_max_cm":165,"size_min_cm":150}'::jsonb,
+  '{"agent_id":"instinct-kk14680","agent_verified":true,"amount_max_cents":50000,"budget_limit_cents":50000,"colour_preference":null,"confirmed_at":"2026-10-26T13:00:00.000Z","currency":"USD","delivery_by":null,"expires_at":"2026-10-27T13:00:00.000Z","merchant_id":"32b14be6-26e6-49df-a7af-79532f910510","payment_method_detail":"PayPal","payment_method_ref":"Demo Checkout","payment_simulated":true,"product_scope":"snowboard","return_policy_required":null,"shipping_max_cost_cents":null,"shipping_method":null,"shopper_ref":"Ivan Dijkstra","size_max_cm":165,"size_min_cm":150}'::jsonb,
   '{"checked":false,"data_sharing_limits":"grant fields only, this purchase only","priority":"P1","private_chat_hash_note":"Seeded demo row: no private chat exists, the hash is of a fixed label.","seeded_demo":true}'::jsonb,
   'VI-aligned demo representation',
   '2026-10-26T13:00:00.000Z'::timestamptz,
   1,
   'sha256:0000000000000000000000000000000000000000000000000000000000000000',
-  'sha256:12bacbc20e07eff0952a34d671c7a4fb7d8f65d311812d9d146a60ad6455d643'
+  'sha256:dbd64f79d13292b5c2f423a225ac1179684e5984368b9254810b20373e2c9deb'
 );
 
 insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, agent_id, agent_verified, merchant_id, product_scope, size_min_cm, size_max_cm, colour_preference, currency, amount_max_cents, budget_limit_cents, payment_method_ref, shipping_method, shipping_max_cost_cents, delivery_by, return_policy_required, confirmed_at, expires_at, private_chat_hash, grant_json, system_metadata, schema_label, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -132,7 +132,7 @@ insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, a
   'USD',
   50000,
   50000,
-  'Demo PayPal',
+  'Demo Checkout',
   null,
   null,
   '2026-10-30'::date,
@@ -140,13 +140,13 @@ insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, a
   '2026-10-26T17:05:00.000Z'::timestamptz,
   '2026-10-27T17:05:00.000Z'::timestamptz,
   'sha256:70bec58dff8c3c082d5fab4040cb36fcb07ff22771e0637c52e8a29f602040b1',
-  '{"agent_id":"meta-muse-j0376672","agent_verified":true,"amount_max_cents":50000,"budget_limit_cents":50000,"colour_preference":"Serpent","confirmed_at":"2026-10-26T17:05:00.000Z","currency":"USD","delivery_by":"2026-10-30","expires_at":"2026-10-27T17:05:00.000Z","merchant_id":"32b14be6-26e6-49df-a7af-79532f910510","payment_method_ref":"Demo PayPal","product_scope":"snowboard","return_policy_required":true,"shipping_max_cost_cents":null,"shipping_method":null,"shopper_ref":"Jemaih Soresky","size_max_cm":165,"size_min_cm":150}'::jsonb,
+  '{"agent_id":"meta-muse-j0376672","agent_verified":true,"amount_max_cents":50000,"budget_limit_cents":50000,"colour_preference":"Serpent","confirmed_at":"2026-10-26T17:05:00.000Z","currency":"USD","delivery_by":"2026-10-30","expires_at":"2026-10-27T17:05:00.000Z","merchant_id":"32b14be6-26e6-49df-a7af-79532f910510","payment_method_detail":"PayPal","payment_method_ref":"Demo Checkout","payment_simulated":true,"product_scope":"snowboard","return_policy_required":true,"shipping_max_cost_cents":null,"shipping_method":null,"shopper_ref":"Jemaih Soresky","size_max_cm":165,"size_min_cm":150}'::jsonb,
   '{"checked":false,"data_sharing_limits":"grant fields only, this purchase only","priority":"P1","private_chat_hash_note":"Seeded demo row: no private chat exists, the hash is of a fixed label.","seeded_demo":true}'::jsonb,
   'VI-aligned demo representation',
   '2026-10-26T17:05:00.000Z'::timestamptz,
   5,
-  'sha256:70303c16f2617c5ad789606c632d7b00b4e8fc3aa62cc01ffb63956ea85d52ee',
-  'sha256:b98616d5b1b45dd9babbeef70b028120fe470d02ecb149e1763f5c41a6dab87f'
+  'sha256:12bf979e485a0c10fae4e4b659e195d60ab277423f069ecf04470db83842fbde',
+  'sha256:8af0c5af913bd71f15b77443ee26afb461e04902020a53b64a40c2ddc3d8c7c0'
 );
 
 insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, agent_id, agent_verified, merchant_id, product_scope, size_min_cm, size_max_cm, colour_preference, currency, amount_max_cents, budget_limit_cents, payment_method_ref, shipping_method, shipping_max_cost_cents, delivery_by, return_policy_required, confirmed_at, expires_at, private_chat_hash, grant_json, system_metadata, schema_label, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -165,7 +165,7 @@ insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, a
   'USD',
   50000,
   50000,
-  'Demo PayPal',
+  'Demo Checkout',
   null,
   null,
   '2026-10-30'::date,
@@ -173,13 +173,13 @@ insert into grants (id, session_id, version, supersedes_grant_id, shopper_ref, a
   '2026-10-26T18:00:00.000Z'::timestamptz,
   '2026-10-27T18:00:00.000Z'::timestamptz,
   'sha256:e9c234821a57377aaef2141763ddcb8ac004d4f3f9f4ac156924a21b00cc3d81',
-  '{"agent_id":"instinct-kk14680","agent_verified":true,"amount_max_cents":50000,"budget_limit_cents":50000,"colour_preference":null,"confirmed_at":"2026-10-26T18:00:00.000Z","currency":"USD","delivery_by":"2026-10-30","expires_at":"2026-10-27T18:00:00.000Z","merchant_id":"32b14be6-26e6-49df-a7af-79532f910510","payment_method_ref":"Demo PayPal","product_scope":null,"return_policy_required":true,"shipping_max_cost_cents":null,"shipping_method":null,"shopper_ref":"Ivan Dijkstra","size_max_cm":165,"size_min_cm":150}'::jsonb,
+  '{"agent_id":"instinct-kk14680","agent_verified":true,"amount_max_cents":50000,"budget_limit_cents":50000,"colour_preference":null,"confirmed_at":"2026-10-26T18:00:00.000Z","currency":"USD","delivery_by":"2026-10-30","expires_at":"2026-10-27T18:00:00.000Z","merchant_id":"32b14be6-26e6-49df-a7af-79532f910510","payment_method_detail":"PayPal","payment_method_ref":"Demo Checkout","payment_simulated":true,"product_scope":null,"return_policy_required":true,"shipping_max_cost_cents":null,"shipping_method":null,"shopper_ref":"Ivan Dijkstra","size_max_cm":165,"size_min_cm":150}'::jsonb,
   '{"checked":false,"data_sharing_limits":"grant fields only, this purchase only","priority":"P1","private_chat_hash_note":"Seeded demo row: no private chat exists, the hash is of a fixed label.","seeded_demo":true}'::jsonb,
   'VI-aligned demo representation',
   '2026-10-26T18:00:00.000Z'::timestamptz,
   10,
-  'sha256:2d5018e714550dd0c35e15ce34e430fbe78587077c617c7ad692880f72f115ea',
-  'sha256:5fa62b63e508ed02b3378721a02012899a2fad30f39392031e6a57857ab0ae29'
+  'sha256:ac628c5233a407f498e0d0549bb79fd008472cf4b9738dadf50a7067a82022bf',
+  'sha256:82d027eee20fd372faf14df03afe74406a31d4f9d4743fb3e9b5953ef3998194'
 );
 
 insert into proposals (id, grant_id, product_id, shown_item_price_cents, shown_total_cents, shown_returns_summary, shown_delivery, shown_at, confirmation_ref, confirmed_at, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -195,8 +195,8 @@ insert into proposals (id, grant_id, product_id, shown_item_price_cents, shown_t
   '2026-10-26T13:04:00.000Z'::timestamptz,
   '2026-10-26T13:04:00.000Z'::timestamptz,
   2,
-  'sha256:12bacbc20e07eff0952a34d671c7a4fb7d8f65d311812d9d146a60ad6455d643',
-  'sha256:e57feeb7ae841dda18b191cd2e03161ebfd9a463c4014f90ac3c564ec2c617ab'
+  'sha256:dbd64f79d13292b5c2f423a225ac1179684e5984368b9254810b20373e2c9deb',
+  'sha256:35a589e8cf81d48397864395947a3e23dc850eccf584e44bdcf96c74eec50af0'
 );
 
 insert into proposals (id, grant_id, product_id, shown_item_price_cents, shown_total_cents, shown_returns_summary, shown_delivery, shown_at, confirmation_ref, confirmed_at, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -212,8 +212,8 @@ insert into proposals (id, grant_id, product_id, shown_item_price_cents, shown_t
   '2026-10-26T17:09:00.000Z'::timestamptz,
   '2026-10-26T17:09:00.000Z'::timestamptz,
   6,
-  'sha256:b98616d5b1b45dd9babbeef70b028120fe470d02ecb149e1763f5c41a6dab87f',
-  'sha256:1bd6f632aca1710a80bc92c01a208c29c20383d2e148e21d4b7ed617a050a2d4'
+  'sha256:8af0c5af913bd71f15b77443ee26afb461e04902020a53b64a40c2ddc3d8c7c0',
+  'sha256:059d36bef59dfa99c0007513b560ab5f74b3f6fad99d51255b755b305c5dc6fe'
 );
 
 insert into proposals (id, grant_id, product_id, shown_item_price_cents, shown_total_cents, shown_returns_summary, shown_delivery, shown_at, confirmation_ref, confirmed_at, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -229,8 +229,8 @@ insert into proposals (id, grant_id, product_id, shown_item_price_cents, shown_t
   '2026-10-26T18:04:00.000Z'::timestamptz,
   '2026-10-26T18:04:00.000Z'::timestamptz,
   11,
-  'sha256:5fa62b63e508ed02b3378721a02012899a2fad30f39392031e6a57857ab0ae29',
-  'sha256:157c0ddeb78e945f7b92402925dbca1f4b87b477cfd5c32a6cb335d58183f38a'
+  'sha256:82d027eee20fd372faf14df03afe74406a31d4f9d4743fb3e9b5953ef3998194',
+  'sha256:b963d7ea01b383392b1af62b699dd55f8e5b2dca8b778ec3eb86fca6ef307489'
 );
 
 insert into actions (id, grant_id, seq, type, detail, agent_believed_terms, image_evidence_ref, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -238,13 +238,13 @@ insert into actions (id, grant_id, seq, type, detail, agent_believed_terms, imag
   '7893c376-c429-4c62-a187-c16e21334cc5'::uuid,
   1,
   'checkout',
-  '{"agent_summary":{"returns":"Final sale"},"brand":"Burton","colour":"Serpent","delivery_date":"2026-10-31","item_price_cents":44995,"payment_method":"Demo PayPal","product_id":"40c70768-77ac-4953-8bae-c75c8319fcf4","product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":44995}'::jsonb,
+  '{"agent_summary":{"returns":"Final sale"},"brand":"Burton","colour":"Serpent","delivery_date":"2026-10-31","item_price_cents":44995,"payment_method":"Demo Checkout","payment_method_detail":"PayPal","payment_simulated":true,"product_id":"40c70768-77ac-4953-8bae-c75c8319fcf4","product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":44995}'::jsonb,
   '{"returns":"Final sale"}'::jsonb,
   null,
   '2026-10-26T13:06:00.000Z'::timestamptz,
   3,
-  'sha256:e57feeb7ae841dda18b191cd2e03161ebfd9a463c4014f90ac3c564ec2c617ab',
-  'sha256:2db9e3553cf217953ea823e1ea8e9c150600a4cbf4532cb4895399776c108ed0'
+  'sha256:35a589e8cf81d48397864395947a3e23dc850eccf584e44bdcf96c74eec50af0',
+  'sha256:d85855bf3fd63aaecd85d5846f46a1d36b3fab46cba27b512987baf4ad9dd866'
 );
 
 insert into actions (id, grant_id, seq, type, detail, agent_believed_terms, image_evidence_ref, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -252,13 +252,13 @@ insert into actions (id, grant_id, seq, type, detail, agent_believed_terms, imag
   '62b883a3-1f9e-45a2-ab49-8990d51e421d'::uuid,
   1,
   'checkout',
-  '{"agent_summary":{"returns":"Easy returns"},"brand":"Burton","colour":"Serpent","delivery_date":"2026-10-30","item_price_cents":44995,"payment_method":"Demo PayPal","product_id":"40c70768-77ac-4953-8bae-c75c8319fcf4","product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":6000,"shipping_method":"expedited","size_cm":156,"total_cents":50995}'::jsonb,
+  '{"agent_summary":{"returns":"Easy returns"},"brand":"Burton","colour":"Serpent","delivery_date":"2026-10-30","item_price_cents":44995,"payment_method":"Demo Checkout","payment_method_detail":"PayPal","payment_simulated":true,"product_id":"40c70768-77ac-4953-8bae-c75c8319fcf4","product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":6000,"shipping_method":"expedited","size_cm":156,"total_cents":50995}'::jsonb,
   '{"returns":"Easy returns"}'::jsonb,
   null,
   '2026-10-26T17:11:00.000Z'::timestamptz,
   7,
-  'sha256:1bd6f632aca1710a80bc92c01a208c29c20383d2e148e21d4b7ed617a050a2d4',
-  'sha256:1b07e5e94bc5b417652fea36356c801ffc29578e98840b9d4399d0671905ced1'
+  'sha256:059d36bef59dfa99c0007513b560ab5f74b3f6fad99d51255b755b305c5dc6fe',
+  'sha256:3c33b28f300f0af926ce53601058e0460d5f1536ff16d77a17a1c53d32b2ad51'
 );
 
 insert into actions (id, grant_id, seq, type, detail, agent_believed_terms, image_evidence_ref, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -266,13 +266,13 @@ insert into actions (id, grant_id, seq, type, detail, agent_believed_terms, imag
   '06f0c0fe-f24e-4817-a857-8b6b2cfefffe'::uuid,
   1,
   'checkout',
-  '{"agent_summary":{"returns":"Free returns"},"brand":"Lib Tech","colour":null,"delivery_date":"2026-10-29","item_price_cents":48983,"payment_method":"Demo PayPal","product_id":"d53088eb-40e0-4fa5-b2f8-1b81e9c7c37e","product_name":"T. Rice Orca Snowboard 2025/2026","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":48983}'::jsonb,
+  '{"agent_summary":{"returns":"Free returns"},"brand":"Lib Tech","colour":null,"delivery_date":"2026-10-29","item_price_cents":48983,"payment_method":"Demo Checkout","payment_method_detail":"PayPal","payment_simulated":true,"product_id":"d53088eb-40e0-4fa5-b2f8-1b81e9c7c37e","product_name":"T. Rice Orca Snowboard 2025/2026","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":48983}'::jsonb,
   '{"returns":"Free returns"}'::jsonb,
   null,
   '2026-10-26T18:06:00.000Z'::timestamptz,
   12,
-  'sha256:157c0ddeb78e945f7b92402925dbca1f4b87b477cfd5c32a6cb335d58183f38a',
-  'sha256:fc1044fc8d1290f99f01d766df16f543ca6fd7974a5386517a506d2db7f40c3c'
+  'sha256:b963d7ea01b383392b1af62b699dd55f8e5b2dca8b778ec3eb86fca6ef307489',
+  'sha256:b3b6032ce642a7d206405bafd6cc90f184311ee4feec86b8c42f6d6f2f5ea8ab'
 );
 
 insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchant_id, terms_snapshot, action_summary, mismatch_results, problems_found, recommendation, missing_components, image_evidence_ref, schema_label, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -283,8 +283,8 @@ insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchan
   'a2bcdc69-c2a5-462c-a4bd-9a71b1c1e278'::uuid,
   '32b14be6-26e6-49df-a7af-79532f910510'::uuid,
   '{"brand":"Burton","colour":"Serpent","expedited_delivery_days":4,"expedited_shipping_cents":6000,"formal_returns":"final_sale","formal_terms_text":"Final Sale","merchant":"Northwind Outfitters","price_cents":44995,"product_id":"40c70768-77ac-4953-8bae-c75c8319fcf4","product_name":"Spellbinder Snowboard 2026/2027","size_cm":156,"standard_delivery_days":5,"standard_shipping_cents":0,"terms_version":"v1"}'::jsonb,
-  '{"brand":"Burton","colour":"Serpent","delivery_date":"2026-10-31","item_price_cents":44995,"order_status":"Confirmed","payment_method":"Demo PayPal","product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":44995}'::jsonb,
-  '[{"actual":"$449.95 total","cause":null,"cited_fields":["amount_max_cents","budget_limit_cents"],"field":"Budget","grant":"$500.00 max","merchant_terms":"Item $449.95, standard shipping free","next_action_who":null,"result":"match"},{"actual":"156cm","cause":null,"cited_fields":["size_min_cm","size_max_cm"],"field":"Size","grant":"150-165cm","merchant_terms":"156cm","next_action_who":null,"result":"match"},{"actual":"Serpent","cause":null,"cited_fields":["colour_preference"],"field":"Colour","grant":null,"merchant_terms":"Serpent","next_action_who":null,"result":"unspecified"},{"actual":"Agent told customer \"Final sale\"","cause":null,"cited_fields":["return_policy_required"],"field":"Returns","grant":null,"merchant_terms":"Final sale","next_action_who":null,"result":"unspecified"},{"actual":"Sat 31 Oct 2026","cause":null,"cited_fields":["delivery_by"],"field":"Delivery","grant":null,"merchant_terms":"Standard 5 days","next_action_who":null,"result":"unspecified"},{"actual":"Standard","cause":null,"cited_fields":["shipping_method"],"field":"Shipping method","grant":null,"merchant_terms":"Standard free, expedited $60.00","next_action_who":null,"result":"unspecified"},{"actual":"Northwind Outfitters","cause":null,"cited_fields":["merchant_id"],"field":"Merchant","grant":"Northwind Outfitters only","merchant_terms":"Northwind Outfitters","next_action_who":null,"result":"match"},{"actual":"Demo PayPal","cause":null,"cited_fields":["payment_method_ref"],"field":"Payment method","grant":"Demo PayPal","merchant_terms":"Demo PayPal","next_action_who":null,"result":"match"}]'::jsonb,
+  '{"brand":"Burton","colour":"Serpent","delivery_date":"2026-10-31","item_price_cents":44995,"order_status":"Confirmed","payment_method":"Demo Checkout — PayPal","product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":44995}'::jsonb,
+  '[{"actual":"$449.95 total","cause":null,"cited_fields":["amount_max_cents","budget_limit_cents"],"field":"Budget","grant":"$500.00 max","merchant_terms":"Item $449.95, standard shipping free","next_action_who":null,"result":"match"},{"actual":"156cm","cause":null,"cited_fields":["size_min_cm","size_max_cm"],"field":"Size","grant":"150-165cm","merchant_terms":"156cm","next_action_who":null,"result":"match"},{"actual":"Serpent","cause":null,"cited_fields":["colour_preference"],"field":"Colour","grant":null,"merchant_terms":"Serpent","next_action_who":null,"result":"unspecified"},{"actual":"Agent told customer \"Final sale\"","cause":null,"cited_fields":["return_policy_required"],"field":"Returns","grant":null,"merchant_terms":"Final sale","next_action_who":null,"result":"unspecified"},{"actual":"Sat 31 Oct 2026","cause":null,"cited_fields":["delivery_by"],"field":"Delivery","grant":null,"merchant_terms":"Standard 5 days","next_action_who":null,"result":"unspecified"},{"actual":"Standard","cause":null,"cited_fields":["shipping_method"],"field":"Shipping method","grant":null,"merchant_terms":"Standard free, expedited $60.00","next_action_who":null,"result":"unspecified"},{"actual":"Northwind Outfitters","cause":null,"cited_fields":["merchant_id"],"field":"Merchant","grant":"Northwind Outfitters only","merchant_terms":"Northwind Outfitters","next_action_who":null,"result":"match"},{"actual":"Demo Checkout — PayPal","cause":null,"cited_fields":["payment_method_ref"],"field":"Payment method","grant":"Demo Checkout — PayPal","merchant_terms":"Demo Checkout — PayPal","next_action_who":null,"result":"match"}]'::jsonb,
   0,
   'represent',
   array[]::text[],
@@ -292,8 +292,8 @@ insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchan
   'VI-aligned demo representation',
   '2026-10-26T13:07:00.000Z'::timestamptz,
   4,
-  'sha256:2db9e3553cf217953ea823e1ea8e9c150600a4cbf4532cb4895399776c108ed0',
-  'sha256:70303c16f2617c5ad789606c632d7b00b4e8fc3aa62cc01ffb63956ea85d52ee'
+  'sha256:d85855bf3fd63aaecd85d5846f46a1d36b3fab46cba27b512987baf4ad9dd866',
+  'sha256:12bf979e485a0c10fae4e4b659e195d60ab277423f069ecf04470db83842fbde'
 );
 
 insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchant_id, terms_snapshot, action_summary, mismatch_results, problems_found, recommendation, missing_components, image_evidence_ref, schema_label, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -304,8 +304,8 @@ insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchan
   'b2c56689-9520-4273-ab75-d4f10bc9a559'::uuid,
   '32b14be6-26e6-49df-a7af-79532f910510'::uuid,
   '{"brand":"Burton","colour":"Serpent","expedited_delivery_days":4,"expedited_shipping_cents":6000,"formal_returns":"final_sale","formal_terms_text":"Final Sale","merchant":"Northwind Outfitters","price_cents":44995,"product_id":"40c70768-77ac-4953-8bae-c75c8319fcf4","product_name":"Spellbinder Snowboard 2026/2027","size_cm":156,"standard_delivery_days":5,"standard_shipping_cents":0,"terms_version":"v1"}'::jsonb,
-  '{"agent_summary_returns":"Easy returns","brand":"Burton","colour":"Serpent","delivery_date":"2026-10-30","item_price_cents":44995,"order_status":"Confirmed","payment_method":"Demo PayPal","product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":6000,"shipping_method":"expedited","size_cm":156,"total_cents":50995}'::jsonb,
-  '[{"actual":"$509.95 total","cause":"Agent treated the cap as item-only","cited_fields":["amount_max_cents","budget_limit_cents"],"field":"Budget","grant":"$500.00 max","merchant_terms":"Item $449.95 + expedited $60.00","next_action_who":"Merchant: concede the dispute","result":"mismatch"},{"actual":"Agent summary \"Easy returns\"","cause":"Agent summary \"Easy returns\" misrepresented the formal final-sale terms","cited_fields":["return_policy_required"],"field":"Returns","grant":"Returnable required","merchant_terms":"Final sale","next_action_who":"Merchant: concede the dispute","result":"mismatch"},{"actual":"156cm","cause":null,"cited_fields":["size_min_cm","size_max_cm"],"field":"Size","grant":"150-165cm","merchant_terms":"156cm","next_action_who":null,"result":"match"},{"actual":"Serpent","cause":null,"cited_fields":["colour_preference"],"field":"Colour","grant":"Serpent","merchant_terms":"Serpent","next_action_who":null,"result":"match"},{"actual":"Fri 30 Oct 2026 (expedited)","cause":null,"cited_fields":["delivery_by"],"field":"Delivery","grant":"By Fri 30 Oct 2026","merchant_terms":"Expedited 4 days, standard 5 days","next_action_who":null,"result":"match"},{"actual":"Expedited","cause":null,"cited_fields":["shipping_method"],"field":"Shipping method","grant":null,"merchant_terms":"Standard free, expedited $60.00","next_action_who":null,"result":"unspecified"},{"actual":"Northwind Outfitters","cause":null,"cited_fields":["merchant_id"],"field":"Merchant","grant":"Northwind Outfitters only","merchant_terms":"Northwind Outfitters","next_action_who":null,"result":"match"},{"actual":"Demo PayPal","cause":null,"cited_fields":["payment_method_ref"],"field":"Payment method","grant":"Demo PayPal","merchant_terms":"Demo PayPal","next_action_who":null,"result":"match"}]'::jsonb,
+  '{"agent_summary_returns":"Easy returns","brand":"Burton","colour":"Serpent","delivery_date":"2026-10-30","item_price_cents":44995,"order_status":"Confirmed","payment_method":"Demo Checkout","payment_method_detail":"PayPal","payment_simulated":true,"product_name":"Spellbinder Snowboard 2026/2027","shipping_cents":6000,"shipping_method":"expedited","size_cm":156,"total_cents":50995}'::jsonb,
+  '[{"actual":"$509.95 total","cause":"Agent treated the cap as item-only","cited_fields":["amount_max_cents","budget_limit_cents"],"field":"Budget","grant":"$500.00 max","merchant_terms":"Item $449.95 + expedited $60.00","next_action_who":"Merchant: concede the dispute","result":"mismatch"},{"actual":"Agent summary \"Easy returns\"","cause":"Agent summary \"Easy returns\" misrepresented the formal final-sale terms","cited_fields":["return_policy_required"],"field":"Returns","grant":"Returnable required","merchant_terms":"Final sale","next_action_who":"Merchant: concede the dispute","result":"mismatch"},{"actual":"156cm","cause":null,"cited_fields":["size_min_cm","size_max_cm"],"field":"Size","grant":"150-165cm","merchant_terms":"156cm","next_action_who":null,"result":"match"},{"actual":"Serpent","cause":null,"cited_fields":["colour_preference"],"field":"Colour","grant":"Serpent","merchant_terms":"Serpent","next_action_who":null,"result":"match"},{"actual":"Fri 30 Oct 2026 (expedited)","cause":null,"cited_fields":["delivery_by"],"field":"Delivery","grant":"By Fri 30 Oct 2026","merchant_terms":"Expedited 4 days, standard 5 days","next_action_who":null,"result":"match"},{"actual":"Expedited","cause":null,"cited_fields":["shipping_method"],"field":"Shipping method","grant":null,"merchant_terms":"Standard free, expedited $60.00","next_action_who":null,"result":"unspecified"},{"actual":"Northwind Outfitters","cause":null,"cited_fields":["merchant_id"],"field":"Merchant","grant":"Northwind Outfitters only","merchant_terms":"Northwind Outfitters","next_action_who":null,"result":"match"},{"actual":"Demo Checkout — PayPal","cause":null,"cited_fields":["payment_method_ref"],"field":"Payment method","grant":"Demo Checkout — PayPal","merchant_terms":"Demo Checkout — PayPal","next_action_who":null,"result":"match"}]'::jsonb,
   2,
   'concede',
   array[]::text[],
@@ -313,8 +313,8 @@ insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchan
   'VI-aligned demo representation',
   '2026-10-26T17:12:00.000Z'::timestamptz,
   8,
-  'sha256:1b07e5e94bc5b417652fea36356c801ffc29578e98840b9d4399d0671905ced1',
-  'sha256:572b79ef4cd7d904d6555ebde45cbf10fe08291708faf1285fc3e1865b504180'
+  'sha256:3c33b28f300f0af926ce53601058e0460d5f1536ff16d77a17a1c53d32b2ad51',
+  'sha256:603ff6b3fa744ee945f26d3bdc28b2a9f98d0ee18158a45e54712b32d0e9c1ad'
 );
 
 insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchant_id, terms_snapshot, action_summary, mismatch_results, problems_found, recommendation, missing_components, image_evidence_ref, schema_label, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -325,8 +325,8 @@ insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchan
   'bba873ee-4369-4db7-a0a1-25afc38260a7'::uuid,
   '32b14be6-26e6-49df-a7af-79532f910510'::uuid,
   '{"brand":"Lib Tech","colour":null,"expedited_delivery_days":null,"expedited_shipping_cents":null,"formal_returns":"free","formal_terms_text":"Free returns within 30 days","merchant":"Northwind Outfitters","price_cents":48983,"product_id":"d53088eb-40e0-4fa5-b2f8-1b81e9c7c37e","product_name":"T. Rice Orca Snowboard 2025/2026","size_cm":156,"standard_delivery_days":3,"standard_shipping_cents":0,"terms_version":"v1"}'::jsonb,
-  '{"agent_summary_returns":"Free returns","brand":"Lib Tech","colour":null,"delivery_date":"2026-10-29","item_price_cents":48983,"order_status":"Confirmed","payment_method":"Demo PayPal","product_name":"T. Rice Orca Snowboard 2025/2026","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":48983}'::jsonb,
-  '[{"actual":"$489.83 total","cause":null,"cited_fields":["amount_max_cents","budget_limit_cents"],"field":"Budget","grant":"$500.00 max","merchant_terms":"Item $489.83, standard shipping free","next_action_who":null,"result":"match"},{"actual":"Agent summary \"Free returns\"","cause":null,"cited_fields":["return_policy_required"],"field":"Returns","grant":"Returnable required","merchant_terms":"Free returns within 30 days","next_action_who":null,"result":"match"},{"actual":"156cm","cause":null,"cited_fields":["size_min_cm","size_max_cm"],"field":"Size","grant":"150-165cm","merchant_terms":"156cm","next_action_who":null,"result":"match"},{"actual":null,"cause":null,"cited_fields":["colour_preference"],"field":"Colour","grant":null,"merchant_terms":null,"next_action_who":null,"result":"unspecified"},{"actual":"Thu 29 Oct 2026 (standard)","cause":null,"cited_fields":["delivery_by"],"field":"Delivery","grant":"By Fri 30 Oct 2026","merchant_terms":"Standard 3 days","next_action_who":null,"result":"match"},{"actual":"Standard, no expedited charge","cause":null,"cited_fields":["shipping_method"],"field":"Shipping method","grant":null,"merchant_terms":"Standard free","next_action_who":null,"result":"unspecified"},{"actual":"Northwind Outfitters","cause":null,"cited_fields":["merchant_id"],"field":"Merchant","grant":"Northwind Outfitters only","merchant_terms":"Northwind Outfitters","next_action_who":null,"result":"match"},{"actual":"Demo PayPal","cause":null,"cited_fields":["payment_method_ref"],"field":"Payment method","grant":"Demo PayPal","merchant_terms":"Demo PayPal","next_action_who":null,"result":"match"}]'::jsonb,
+  '{"agent_summary_returns":"Free returns","brand":"Lib Tech","colour":null,"delivery_date":"2026-10-29","item_price_cents":48983,"order_status":"Confirmed","payment_method":"Demo Checkout","payment_method_detail":"PayPal","payment_simulated":true,"product_name":"T. Rice Orca Snowboard 2025/2026","shipping_cents":0,"shipping_method":"standard","size_cm":156,"total_cents":48983}'::jsonb,
+  '[{"actual":"$489.83 total","cause":null,"cited_fields":["amount_max_cents","budget_limit_cents"],"field":"Budget","grant":"$500.00 max","merchant_terms":"Item $489.83, standard shipping free","next_action_who":null,"result":"match"},{"actual":"Agent summary \"Free returns\"","cause":null,"cited_fields":["return_policy_required"],"field":"Returns","grant":"Returnable required","merchant_terms":"Free returns within 30 days","next_action_who":null,"result":"match"},{"actual":"156cm","cause":null,"cited_fields":["size_min_cm","size_max_cm"],"field":"Size","grant":"150-165cm","merchant_terms":"156cm","next_action_who":null,"result":"match"},{"actual":null,"cause":null,"cited_fields":["colour_preference"],"field":"Colour","grant":null,"merchant_terms":null,"next_action_who":null,"result":"unspecified"},{"actual":"Thu 29 Oct 2026 (standard)","cause":null,"cited_fields":["delivery_by"],"field":"Delivery","grant":"By Fri 30 Oct 2026","merchant_terms":"Standard 3 days","next_action_who":null,"result":"match"},{"actual":"Standard, no expedited charge","cause":null,"cited_fields":["shipping_method"],"field":"Shipping method","grant":null,"merchant_terms":"Standard free","next_action_who":null,"result":"unspecified"},{"actual":"Northwind Outfitters","cause":null,"cited_fields":["merchant_id"],"field":"Merchant","grant":"Northwind Outfitters only","merchant_terms":"Northwind Outfitters","next_action_who":null,"result":"match"},{"actual":"Demo Checkout — PayPal","cause":null,"cited_fields":["payment_method_ref"],"field":"Payment method","grant":"Demo Checkout — PayPal","merchant_terms":"Demo Checkout — PayPal","next_action_who":null,"result":"match"}]'::jsonb,
   0,
   'represent',
   array[]::text[],
@@ -334,8 +334,8 @@ insert into receipts (id, receipt_ref, order_ref, grant_id, proposal_id, merchan
   'VI-aligned demo representation',
   '2026-10-26T18:07:00.000Z'::timestamptz,
   13,
-  'sha256:fc1044fc8d1290f99f01d766df16f543ca6fd7974a5386517a506d2db7f40c3c',
-  'sha256:42b958ec366751fec4bbc4215983f9ea0a2e9baf68444399d1a69d909df70499'
+  'sha256:b3b6032ce642a7d206405bafd6cc90f184311ee4feec86b8c42f6d6f2f5ea8ab',
+  'sha256:b99442ca6f1458304ca8186ca29c622cd5e8f64c3abfafe8d16dece3f90d2f4b'
 );
 
 insert into disputes (id, receipt_id, reason, opened_at, created_at) values (
@@ -362,8 +362,8 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '{}'::jsonb,
   '2026-10-26T17:30:00.000Z'::timestamptz,
   9,
-  'sha256:572b79ef4cd7d904d6555ebde45cbf10fe08291708faf1285fc3e1865b504180',
-  'sha256:2d5018e714550dd0c35e15ce34e430fbe78587077c617c7ad692880f72f115ea'
+  'sha256:603ff6b3fa744ee945f26d3bdc28b2a9f98d0ee18158a45e54712b32d0e9c1ad',
+  'sha256:ac628c5233a407f498e0d0549bb79fd008472cf4b9738dadf50a7067a82022bf'
 );
 
 insert into dispute_events (id, dispute_id, event_type, decided_by, basis, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -374,8 +374,8 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '{}'::jsonb,
   '2026-10-26T18:30:00.000Z'::timestamptz,
   14,
-  'sha256:42b958ec366751fec4bbc4215983f9ea0a2e9baf68444399d1a69d909df70499',
-  'sha256:08ddb300754fad49a9f1e221158351bd98a577ba6e1ab9f553f43eeb38e3e9ad'
+  'sha256:b99442ca6f1458304ca8186ca29c622cd5e8f64c3abfafe8d16dece3f90d2f4b',
+  'sha256:7951e80ef8fc8c0c7510d82896bd7bfe026f0ba0393c755c4e226772461046ea'
 );
 
 insert into dispute_events (id, dispute_id, event_type, decided_by, basis, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -386,8 +386,8 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '{"problems_found":0,"recommendation":"represent"}'::jsonb,
   '2026-10-26T18:31:00.000Z'::timestamptz,
   15,
-  'sha256:08ddb300754fad49a9f1e221158351bd98a577ba6e1ab9f553f43eeb38e3e9ad',
-  'sha256:6913f5b5fd7ca22146f320ef2bdf9e317044b9403d50f6ca809ffd2b31066136'
+  'sha256:7951e80ef8fc8c0c7510d82896bd7bfe026f0ba0393c755c4e226772461046ea',
+  'sha256:d269e44664d08923b9f4c100a90049bfb7a541384b0bc370d8f52ef4778e6145'
 );
 
 insert into dispute_events (id, dispute_id, event_type, decided_by, basis, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -398,8 +398,8 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '{"receipt_ref":"AR-2026-0043"}'::jsonb,
   '2026-10-26T18:40:00.000Z'::timestamptz,
   16,
-  'sha256:6913f5b5fd7ca22146f320ef2bdf9e317044b9403d50f6ca809ffd2b31066136',
-  'sha256:a80b721c775154a7144e570678df1a2e3340a135acf8b9ff97d48371d680c469'
+  'sha256:d269e44664d08923b9f4c100a90049bfb7a541384b0bc370d8f52ef4778e6145',
+  'sha256:535ab5aed3b194efcdf5199e8fa1e119f57762e4396ef565ddcd5095ffe96ca6'
 );
 
 insert into dispute_events (id, dispute_id, event_type, decided_by, basis, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -410,8 +410,8 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '{"receipt_ref":"AR-2026-0043"}'::jsonb,
   '2026-10-26T18:50:00.000Z'::timestamptz,
   17,
-  'sha256:a80b721c775154a7144e570678df1a2e3340a135acf8b9ff97d48371d680c469',
-  'sha256:9df31ea018e1da2ecd6b7d51db3e7b12335e0923dde0d4955115212ecb3ebdf2'
+  'sha256:535ab5aed3b194efcdf5199e8fa1e119f57762e4396ef565ddcd5095ffe96ca6',
+  'sha256:77e67f07be52c0d60ef65cf7b53155b63d92bf865140224b864975589e3e591a'
 );
 
 -- The next chained entry gets chain_seq 18.

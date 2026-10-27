@@ -4,6 +4,13 @@ import PhoneFrame from './PhoneFrame'
 import { Bubble, OfferCard, OrderCard, StatusLine } from './Cards'
 import type { AgentReply, ChatItem, OfferCardData } from './types'
 
+// Payment choices shown once, when Muse asks. Visa and Mastercard are card networks; Stripe Checkout and PayPal are checkout methods.
+const PAYMENTS: { label: string; suggested?: boolean }[] = [
+  { label: 'Demo Visa card ••4242', suggested: true },
+  { label: 'Mastercard' },
+  { label: 'Stripe Checkout' },
+  { label: 'PayPal' },
+]
 const HELLO = "Hi, I'm Muse. Tell me what you're looking for at Northwind Outfitters."
 const DEMO_PROMPT =
   "Find and purchase a less than $500 snowboard that will arrive at my address in 2 days."
@@ -12,6 +19,7 @@ const DEMO_PROMPT =
 export default function ChatApp() {
   const [items, setItems] = useState<ChatItem[]>([{ id: 0, kind: 'muse', text: HELLO }])
   const [draft, setDraft] = useState<unknown>(null)
+  const [askPay, setAskPay] = useState(false)
   const [offers, setOffers] = useState<unknown[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [ordered, setOrdered] = useState(false)
@@ -32,6 +40,7 @@ export default function ChatApp() {
     const add: ChatItem[] = (reply.steps ?? []).map((s) => ({ id: id(), kind: 'status', text: s }))
     if (reply.session_id) setSessionId(reply.session_id)
     if (reply.draft !== undefined) setDraft(reply.draft)
+    setAskPay(reply.ask_payment === true)
     if (reply.type === 'message') add.push({ id: id(), kind: 'muse', text: reply.text })
     else if (reply.type === 'proposals') {
       setOffers(reply.offers)
@@ -49,6 +58,7 @@ export default function ChatApp() {
     const base: ChatItem[] = [...items, { id: id(), kind: 'me', text: t }]
     setItems(base)
     setText('')
+    setAskPay(false)
     setBusy(true)
     const reply = await askAgent({ messages: words(base), session_id: sessionId, draft, offers })
     setBusy(false)
@@ -71,6 +81,24 @@ export default function ChatApp() {
               <span>Try the demo test sequence</span>
               <span className="shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Recommended</span>
             </button>
+          )}
+          {askPay && !ordered && !busy && (
+            <div aria-label="Payment options" className="space-y-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
+                {PAYMENTS.map((pm) => (
+                  <button
+                    key={pm.label}
+                    type="button"
+                    onClick={() => void send(`Pay with ${pm.label}.`)}
+                    className={`rounded-xl border px-2 py-2 text-left text-xs font-semibold ${pm.suggested ? 'col-span-2 border-2 border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-neutral-300 bg-white text-neutral-900'}`}
+                  >
+                    {pm.label}
+                    {pm.suggested && <span className="ml-2 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Suggested</span>}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-neutral-500">Or type any other payment — I'll record it as demo checkout. Demo test card, last four digits only.</p>
+            </div>
           )}
           <form onSubmit={(e) => { e.preventDefault(); void send(text) }} className="flex gap-2">
             <input

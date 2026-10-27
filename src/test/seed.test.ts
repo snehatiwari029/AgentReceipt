@@ -98,14 +98,15 @@ describe('dashboard demo seed', () => {
     expect(JSON.stringify(proposal)).not.toMatch(/final/i)
   })
 
-  it('stores grant fields only: unmentioned fields are null, no chat text, Demo PayPal, no card wording', async () => {
+  it('stores grant fields only: unmentioned fields are null, no chat text, Demo Checkout, no card wording', async () => {
     const { records, sql } = await chainOf()
     const grants = records.filter((r) => r.table === 'grants').map((r) => r.row)
     const b = grants.find((g) => g.shopper_ref === 'Ivan Dijkstra' && g.agent_id === 'instinct-kk14680' && g.return_policy_required === true)!
     expect(b.colour_preference).toBeNull()
     expect(b.product_scope).toBeNull()
     for (const g of grants) {
-      expect(g.payment_method_ref).toBe('Demo PayPal')
+      expect(g.payment_method_ref).toBe('Demo Checkout')
+      expect(g.grant_json).toMatchObject({ payment_method_detail: 'PayPal', payment_simulated: true })
       expect(g.schema_label).toBe('VI-aligned demo representation')
       expect(g.return_policy_required === false).toBe(false)
       expect(Object.keys(g)).not.toEqual(expect.arrayContaining(['intent_verbatim']))

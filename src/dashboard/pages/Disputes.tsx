@@ -1,18 +1,9 @@
-import type { Dispute, DisputeEvent, DisputeEventType, Receipt } from '../../shared/schemas'
+import type { Dispute, DisputeEvent, Receipt } from '../../shared/schemas'
+import { DISPUTE_STATUS, disputeStatus } from '../status'
 import { useRows } from '../data'
 import { Card, Empty, Live, PageTitle } from '../components/Panel'
 import { RecommendationBadge } from '../components/Badges'
 import VerdictTable from '../components/VerdictTable'
-
-const STATUS: Record<DisputeEventType, string> = {
-  opened: 'Open',
-  recommendation: 'Recommendation made',
-  conceded: 'Conceded',
-  represented: 'Represented',
-  pack_generated: 'Evidence pack ready',
-  outcome_won: 'Won',
-  outcome_lost: 'Lost',
-}
 
 export default function Disputes() {
   const disputes = useRows<Dispute>('disputes', 'opened_at', false)
@@ -42,8 +33,7 @@ export default function Disputes() {
               {rows.map((d) => {
                 const receipt = receipts.status === 'ready' ? receipts.rows.find((r) => r.id === d.receipt_id) : undefined
                 const evs = events.status === 'ready' ? events.rows.filter((e) => e.dispute_id === d.id) : []
-                const latest = evs.length > 0 ? evs[evs.length - 1].event_type : 'opened'
-                return (
+                                return (
                   <Card key={d.id} label={`Dispute ${receipt?.receipt_ref ?? d.id}`}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -51,7 +41,7 @@ export default function Disputes() {
                         <p className="text-sm text-dash-body">Reason: {d.reason}</p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-semibold text-dash-ink">{STATUS[latest]}</span>
+                        <span className="text-sm font-semibold text-dash-ink">{disputeStatus(evs)}</span>
                         {receipt && <RecommendationBadge value={receipt.recommendation} />}
                       </div>
                     </div>
@@ -62,6 +52,7 @@ export default function Disputes() {
                           {receipt.problems_found} {receipt.problems_found === 1 ? 'problem' : 'problems'} found
                         </p>
                         <VerdictTable rows={receipt.mismatch_results} />
+                        <p className="mt-2 text-xs text-dash-label">{receipt.schema_label}. Verified-agent status is simulated.</p>
                       </div>
                     )}
 
@@ -69,7 +60,7 @@ export default function Disputes() {
                       <ol className="mt-5 border-t border-dash-edge pt-4 text-sm">
                         {evs.map((e) => (
                           <li key={e.id} className="flex flex-wrap gap-x-3 py-1">
-                            <span className="font-semibold text-dash-ink">{STATUS[e.event_type]}</span>
+                            <span className="font-semibold text-dash-ink">{DISPUTE_STATUS[e.event_type]}</span>
                             <span className="text-dash-label">{e.decided_by ? `by ${e.decided_by}` : 'automatic'}</span>
                           </li>
                         ))}

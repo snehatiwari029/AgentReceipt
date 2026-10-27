@@ -1,10 +1,10 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NINE } from './fixtures'
-import { fakeClient, mock } from './mockSupabase'
-import { CHAIN } from './chain.test'
+import { fakeClient, mock, type Result } from './mockSupabase'
+import { buildSeed } from '../../scripts/seed-dashboard-demo'
 
 vi.mock('../shared/supabase', () => ({ supabase: fakeClient }))
 
@@ -12,33 +12,19 @@ import AppRoutes from '../app/AppRoutes'
 import { causeCounts, contradictingProducts } from '../dashboard/pages/Optimization'
 import type { Receipt } from '../shared/schemas'
 
-const h = (c: string) => `sha256:${c.repeat(64)}` as const
+// Test only: the rows the seed script generates are served by the fake database,
+// exactly as they would come back from the real tables.
+let SEEDED: Record<string, Result> = {}
+beforeAll(async () => {
+  const { records } = await buildSeed()
+  const by = (t: string) => ({ data: records.filter((r) => r.table === t).map((r) => r.row), error: null })
+  SEEDED = {
+    sessions: by('sessions'), grants: by('grants'), proposals: by('proposals'), actions: by('actions'),
+    receipts: by('receipts'), disputes: by('disputes'), dispute_events: by('dispute_events'), products: { data: NINE, error: null },
+  }
+})
 
-// TEST fixture only. The app contains no receipt data: it reads the receipts table.
-const RECEIPT = {
-  id: 'r1',
-  receipt_ref: 'TEST-0001',
-  order_ref: '1',
-  grant_id: 'g1',
-  proposal_id: null,
-  merchant_id: 'm1',
-  terms_snapshot: {},
-  action_summary: { product_name: 'Test Board', total_cents: 50995 },
-  mismatch_results: [
-    { field: 'Budget', grant: '$500.00', merchant_terms: '–', actual: '$509.95', result: 'mismatch', cause: 'Cap read as item-only', next_action_who: 'Merchant concedes', cited_fields: [] },
-    { field: 'Colour', grant: null, merchant_terms: null, actual: 'Blue/Black', result: 'unspecified', cause: null, next_action_who: null, cited_fields: [] },
-  ],
-  problems_found: 1,
-  recommendation: 'concede',
-  missing_components: [],
-  image_evidence_ref: null,
-  schema_label: 'VI-aligned demo representation',
-  chain_seq: 4,
-  prev_hash: h('c'),
-  entry_hash: h('d'),
-} as unknown as Receipt
-
-const open = async (path: string) => {
+const open = (path: string) => {
   sessionStorage.setItem('agentreceipt-demo-merchant', 'yes')
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -53,65 +39,102 @@ beforeEach(() => {
   mock.tables = {}
 })
 
-describe('Dashboard pages read live data and show empty states', () => {
+describe('Dashboard pages: empty and error states', () => {
   it.each([
     ['/dashboard/orders', /no agent orders yet/i],
     ['/dashboard/disputes', /no disputes yet/i],
     ['/dashboard/tamper', /the chain is empty/i],
-  ])('%s shows an empty state, not fake rows or a placeholder', async (path, text) => {
-    await open(path)
+  ])('%s shows a proper empty state, not fake rows or a placeholder', async (path, text) => {
+    open(path)
     expect(await screen.findByText(text)).toBeInTheDocument()
     expect(screen.queryByText(/not built yet/i)).not.toBeInTheDocument()
   })
 
   it('shows the database error instead of fallback data', async () => {
     mock.next = { data: null, error: { message: 'permission denied for table receipts' } }
-    await open('/dashboard/orders')
+    open('/dashboard/orders')
     expect(await screen.findByRole('alert')).toHaveTextContent('permission denied for table receipts')
   })
+})
 
-  it('Agent orders lists a receipt and opens its line-by-line check', async () => {
-    mock.tables = { receipts: { data: [RECEIPT], error: null } }
-    const user = userEvent.setup()
-    await open('/dashboard/orders')
-    expect(await screen.findByText('TEST-0001')).toBeInTheDocument()
-    expect(screen.getByText('$509.95')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /show check/i }))
-    expect(screen.getByRole('columnheader', { name: 'Next action / Who acts' })).toBeInTheDocument()
-    expect(screen.getByText('✕ Mismatch')).toBeInTheDocument()
-    expect(screen.getByText('– Not specified')).toBeInTheDocument()
-    expect(screen.getByText(/does not decide liability/i)).toBeInTheDocument()
+describe('Dashboard pages with the seeded rows (read live from the tables)', () => {
+  beforeEach(() => {
+    mock.tables = SEEDED
   })
 
-  it('Optimization flags a product page that mentions returns while terms say final sale, from live products', async () => {
+  it('Agent orders shows 12322, 13422 and 14522 with customer, verified-simulated agent, status and dispute', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/orders')
+    const hero = (await screen.findByText('12322')).closest('tr')!
+    expect(within(hero).getByText('AR-2026-0042')).toBeInTheDocument()
+    expect(within(hero).getByText('Jemaih Soresky')).toBeInTheDocument()
+    expect(within(hero).getByText('meta-muse-j0376672 (verified, simulated)')).toBeInTheDocument()
+    expect(within(hero).getByText('Confirmed')).toBeInTheDocument()
+    expect(within(hero).getByText('Dispute received')).toBeInTheDocument()
+    expect(within(hero).getByText('$509.95')).toBeInTheDocument()
+
+    const b = screen.getByText('13422').closest('tr')!
+    expect(within(b).getByText('Ivan Dijkstra')).toBeInTheDocument()
+    expect(within(b).getByText('$489.83')).toBeInTheDocument()
+    expect(within(b).getByText('Won')).toBeInTheDocument()
+
+    const gap = screen.getByText('14522').closest('tr')!
+    expect(within(gap).getByText('Unverified agent, no AgentReceipt session opened, no receipt (gap recorded)')).toBeInTheDocument()
+    expect(within(gap).queryByRole('button')).not.toBeInTheDocument()
+
+    await user.click(within(hero).getByRole('button', { name: /show check/i }))
+    const th = screen.getAllByRole('columnheader').map((c) => c.textContent)
+    expect(th).toEqual(expect.arrayContaining(['Field', 'Grant', 'Merchant terms', 'Actual', 'Match', 'Cause', 'Next action / Who acts']))
+    expect(screen.queryByRole('columnheader', { name: /liab/i })).not.toBeInTheDocument()
+    expect(screen.getAllByText('✕ Mismatch')).toHaveLength(2)
+    expect(screen.getByText(/does not decide liability and no network rule moves liability on this screen/i)).toBeInTheDocument()
+    expect(screen.getByText(/VI-aligned demo representation/)).toBeInTheDocument()
+  })
+
+  it('Disputes shows 12322 as received and 13422 as won with a clean receipt', async () => {
+    open('/dashboard/disputes')
+    expect(await screen.findByText('AR-2026-0042')).toBeInTheDocument()
+    expect(screen.getAllByText('Dispute received').length).toBeGreaterThan(0)
+    expect(screen.getByText('AR-2026-0043')).toBeInTheDocument()
+    expect(screen.getAllByText('Won').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Claimed agent overstep/)).toBeInTheDocument()
+    expect(screen.getByText('2 problems found')).toBeInTheDocument()
+    expect(screen.getByText('0 problems found')).toBeInTheDocument()
+    expect(screen.getAllByText('– Not specified').length).toBeGreaterThan(0)
+  })
+
+  it('Tamper: the original verifies, and the tampered copy of AR-2026-0041 ($449.95 to $44.99) visibly fails', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/tamper')
+    await user.click(await screen.findByRole('button', { name: 'Verify chain' }))
+    expect(await screen.findByText(/original verified: 17 entries/i)).toBeInTheDocument()
+
+    expect(screen.getByRole('option', { name: 'AR-2026-0041', selected: true })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Tamper with the amount' }))
+    expect(await screen.findByText(/tampered copy fails verification/i)).toBeInTheDocument()
+    expect(screen.getByText(/AR-2026-0041: \$449\.95/)).toHaveTextContent('$44.99')
+    expect(screen.getByText(/no longer matches its hash/i)).toBeInTheDocument()
+    expect(within(screen.getByRole('table')).getByText('✕ Content changed')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    expect(screen.getByText('No tampering yet.')).toBeInTheDocument()
+  })
+})
+
+describe('Optimization', () => {
+  it('flags a product page that mentions returns while the terms say final sale, from live products', async () => {
     mock.tables = { products: { data: NINE, error: null } }
-    await open('/dashboard/optimization')
-    const item = await screen.findByText(/Burton Spellbinder/)
-    expect(item).toBeInTheDocument()
+    open('/dashboard/optimization')
+    expect(await screen.findByText(/Burton Spellbinder/)).toBeInTheDocument()
     expect(screen.getByText('Easy returns.')).toBeInTheDocument()
     expect(contradictingProducts(NINE)).toHaveLength(1)
   })
 
   it('counts mismatch causes only for mismatches', () => {
-    expect(causeCounts([RECEIPT, RECEIPT])).toEqual([{ field: 'Budget', cause: 'Cap read as item-only', count: 2 }])
-  })
-
-  it('Tamper: verifies an intact chain, then fails visibly after the tamper button', async () => {
-    mock.tables = { chain_entries: { data: CHAIN, error: null } }
-    const user = userEvent.setup()
-    await open('/dashboard/tamper')
-    await user.click(await screen.findByRole('button', { name: 'Verify chain' }))
-    expect(screen.getByText(/chain intact: 4 entries/i)).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Tamper with this entry' }))
-    expect(screen.getByText(/not verified yet/i)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Verify chain' }))
-    expect(screen.getByText(/verification failed/i)).toBeInTheDocument()
-    const table = screen.getByRole('table')
-    expect(within(table).getByText('✕ Broken')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
-    await user.click(screen.getByRole('button', { name: 'Verify chain' }))
-    expect(screen.getByText(/chain intact/i)).toBeInTheDocument()
+    const r = { mismatch_results: [
+      { field: 'Budget', result: 'mismatch', cause: 'Cap read as item-only' },
+      { field: 'Colour', result: 'unspecified', cause: null },
+    ] } as unknown as Receipt
+    expect(causeCounts([r, r])).toEqual([{ field: 'Budget', cause: 'Cap read as item-only', count: 2 }])
   })
 })

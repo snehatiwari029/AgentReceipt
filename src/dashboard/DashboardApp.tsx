@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { Link, NavLink, Route, Routes } from 'react-router-dom'
 import Login from './Login'
 import Home from './pages/Home'
-import Placeholder from './pages/Placeholder'
+import AgentOrders from './pages/AgentOrders'
+import Disputes from './pages/Disputes'
+import Optimization from './pages/Optimization'
+import Tamper from './pages/Tamper'
 import { isSignedIn, signIn, signOut } from './session'
 
 const NAV = [
@@ -69,10 +72,10 @@ export default function DashboardApp() {
       <main className="min-w-0 flex-1 p-6">
         <Routes>
           <Route index element={<Home />} />
-          <Route path="orders" element={<Placeholder title="Agent orders" comesWith="Agent orders with their receipts, once the agent loop and receipt chain are connected." />} />
-          <Route path="disputes" element={<Placeholder title="Disputes" comesWith="The dispute queue, the line-by-line verdict and the evidence pack." />} />
-          <Route path="optimization" element={<Placeholder title="Optimization" comesWith="Where agents misread this store's terms, and what to change." />} />
-          <Route path="tamper" element={<Placeholder title="Tamper" comesWith="The chain check, and the tamper demo that visibly fails verification." />} />
+          <Route path="orders" element={<AgentOrders />} />
+          <Route path="disputes" element={<Disputes />} />
+          <Route path="optimization" element={<Optimization />} />
+          <Route path="tamper" element={<Tamper />} />
           <Route path="*" element={<Home />} />
         </Routes>
       </main>

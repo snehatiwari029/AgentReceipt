@@ -32,8 +32,10 @@ Rules, enforced by tests (`src/test/separation.test.ts`):
 
 ## Status
 
-- Built: shop (9 products, photos from Supabase Storage), dashboard shell with demo sign-in and navigation, database schema.
-- Not built yet: agent loop, receipts and hash chain, tamper demo, mismatch detection, dispute screens, evidence pack, detection beat. The dashboard sections say "Not built yet" until then.
+- Built: shop (9 products, photos from Supabase Storage), dashboard with demo sign-in and four pages that read Supabase live (Agent orders, Disputes, Optimization, Tamper), database schema.
+- The dashboard pages show empty states until receipts exist. They fill in on their own once rows are written, with no code change.
+- Not built yet: agent loop, receipt function that writes hash-chained rows, mismatch engine, evidence pack, detection beat.
+- The Tamper page checks the links between chain entries and simulates an edit on a copy in the browser. Recomputing each hash from its record comes with the receipt function.
 
 ## Supabase
 
@@ -42,6 +44,7 @@ Project `AgentReceipt` (Postgres, Storage, edge functions). SQL, in order:
 2. `supabase/002_products_store_columns.sql`
 3. `supabase/003_seed_products.sql` (the 9 products from the catalog CSV; header lists what was assumed)
 4. `supabase/004_product_images_bucket.sql`
+5. `supabase/005_demo_read_policies.sql` (read-only access for the dashboard; writes stay blocked)
 
 Product photos are stored in the `product-images` bucket. Each product has `image_id` (storage path) and `image_hash` (SHA-256 of the file). They are real retailer photos, not Muse Image generations (see Amendment 2, section 5).
 

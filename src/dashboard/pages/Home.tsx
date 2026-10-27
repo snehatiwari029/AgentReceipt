@@ -6,7 +6,7 @@ export default function Home() {
     <div>
       <h1 className="text-2xl font-bold text-dash-ink">Dashboard</h1>
       <p className="mt-2 text-sm text-dash-body">
-        Merchant view for Northwind Outfitters. Order, receipt and dispute screens are not built yet.
+        Merchant view for Northwind Outfitters. Open a section on the left.
       </p>
 
       <section className="mt-6 max-w-md rounded-xl border border-dash-edge bg-dash-card p-5" aria-label="Catalog">

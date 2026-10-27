@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { handle, type AgentReply, type ProductRow, type Step, type Store } from '../../supabase/functions/shopper-agent/agent'
 import { appendChained, type ChainDb } from '../../supabase/functions/auditor/chain'
 import { runAuditor, type AuditorDb } from '../../supabase/functions/auditor/run'
-import { createSparkReader, type SemanticReader } from '../../supabase/functions/auditor/spark'
+import { createSparkReader, parseExactDeliveryPhrase, type SemanticReader } from '../../supabase/functions/auditor/spark'
 import type { ModelClient, ModelReply } from '../../supabase/functions/shopper-agent/model'
 import { verifyChain, type ChainRecord } from '../shared/chain'
 
@@ -66,7 +66,7 @@ function world() {
     logStep: async (session_id, step, detail) => void tables.session_events.push({ session_id, step, detail, simulated: false }),
   }
   const records = (): ChainRecord[] => chainRows().map((r) => ({ chain_seq: r.chain_seq as number, entry_type: ((['grants', 'proposals', 'actions', 'receipts'] as const).find((t) => tables[t].includes(r))!.slice(0, -1)) as ChainRecord['entry_type'], row: r as ChainRecord['row'] }))
-  return { tables, store, auditorDb, reads, records, attention: () => tables.receipts.filter((r) => r.decision === 'hold' || r.decision === 'review').length }
+  return { tables, store, auditorDb, reads, records, attention: () => tables.receipts.filter((r) => r.decision === 'review_required' || r.decision === 'hold_suspicion').length }
 }
 
 const call = (name: string, args: unknown, id = `c${Math.random()}`): ModelReply => ({ content: null, tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] })
@@ -81,11 +81,17 @@ const NOW = () => new Date('2026-10-26T18:00:00Z')
 const CHAT = 'Help me place an order for a snowboard for this weekend trip with my friends. It should look cool, size 150-165 cm, I need it by Friday. Budget under $500. I should be able to return it if it doesn\'t work for me.'
 const rules = { budget_max_dollars: 500, size_min_cm: 150, size_max_cm: 165, colour_preference: null, delivery_by: '2026-10-30', return_policy_required: true, product_scope: 'snowboard', why: 'Reading your request' }
 
-// The reader the auditor uses. Records exactly what Spark would be sent.
-function reader(kind: 'returnable' | 'final_sale' | 'unclear' = 'returnable') {
-  const sent: [string, string][] = []
-  const r: SemanticReader = { readReturns: async (b, f) => { sent.push([b, f]); return { believed_kind: kind, source: 'muse-spark' } } }
-  return { r, sent }
+// The reader the auditor uses. Records exactly what Spark would be sent: structured fields only.
+// `agrees` = the agent's claim means what a returnable product's terms mean (true) or the opposite (false).
+type ReturnsIn = Parameters<SemanticReader['readReturns']>[0]
+function reader(agrees: boolean | null = true) {
+  const sent: ReturnsIn[] = []
+  const sentDelivery: string[] = []
+  const r: SemanticReader = {
+    readReturns: async (i) => { sent.push(i); return { returns_summary_matches_terms: agrees === null ? null : (i.formal_returns === 'final_sale' ? !agrees : agrees), reason: 'test reader', source: 'muse-spark' } },
+    readDelivery: async (phrase, today) => { sentDelivery.push(phrase); return { claimed_date: parseExactDeliveryPhrase(phrase, today), source: 'rules-fallback' } },
+  }
+  return { r, sent, sentDelivery }
 }
 
 // A full order through the real shopper brain, with the order-received signal wired to the real auditor.
@@ -110,9 +116,9 @@ async function placeOrder(w: ReturnType<typeof world>, pick: { id: string; ship:
 }
 
 describe('auditor: live runs on stored records', () => {
-  it('hero: the auditor runs at order received, finds 2 problems, HOLD, and Orders requiring attention goes 0 -> 1', async () => {
+  it('hero: the auditor runs at order received, finds 2 problems, Review Required, and Orders requiring attention goes 0 -> 1', async () => {
     const w = world()
-    const rd = reader('returnable')
+    const rd = reader(true)
     // Scenario B first: PASS, nothing needs attention
     await placeOrder(w, { id: ORCA, ship: 'standard', said: 'Free returns' }, rd.r)
     expect(w.tables.receipts).toHaveLength(1)
@@ -123,7 +129,7 @@ describe('auditor: live runs on stored records', () => {
     await placeOrder(w, { id: BURTON, ship: 'expedited', said: 'Easy returns' }, rd.r)
     expect(w.tables.receipts).toHaveLength(2)
     const hero = w.tables.receipts[1]
-    expect(hero).toMatchObject({ decision: 'hold', problems_found: 2, fulfillment: 'held', recommendation: null, missing_components: [] })
+    expect(hero).toMatchObject({ decision: 'review_required', problems_found: 2, fulfillment: 'held', recommendation: null, missing_components: [] })
     expect((hero.audit as { problem_fields: string[] }).problem_fields).toEqual(['Budget', 'Returns'])
     expect(hero.receipt_ref).toBe('AR-2026-0002')
     expect(hero.order_ref).toBe('15002')
@@ -147,7 +153,7 @@ describe('auditor: live runs on stored records', () => {
     expect(w.tables.receipts).toHaveLength(1)
   })
 
-  it('tamper: an action edited after it was written fails hash recomputation -> REVIEW, never pass', async () => {
+  it('tamper: an action edited after it was written fails hash recomputation -> Hold for Suspicion, never pass', async () => {
     const w = world()
     const rd = reader()
     const done = await placeOrder(w, { id: ORCA, ship: 'standard', said: 'Free returns' }, rd.r, false)
@@ -156,34 +162,35 @@ describe('auditor: live runs on stored records', () => {
     const r = await runAuditor({ session_id: done.session_id }, { db: w.auditorDb, reader: rd.r, now: NOW, newId })
     expect(r.type).toBe('audit')
     if (r.type !== 'audit') return
-    expect(r.audit.decision).toBe('review')
+    expect(r.audit.decision).toBe('hold_suspicion')
     expect(r.audit.tamper_failed).toBe(true)
     expect(r.attention).toBe(true)
-    expect(w.tables.receipts[0]).toMatchObject({ decision: 'review' })
+    expect(w.tables.receipts[0]).toMatchObject({ decision: 'hold_suspicion' })
   })
 
-  it('missing formal terms: REVIEW with terms listed missing, Returns neither passed nor failed', async () => {
+  it('missing formal terms: Hold for Suspicion with terms listed missing, Returns neither passed nor failed', async () => {
     const w = world()
     const rd = reader()
     const done = await placeOrder(w, { id: ORCA, ship: 'standard', said: 'Free returns' }, rd.r, false)
     const db: AuditorDb = { ...w.auditorDb, product: async () => null }
     const r = await runAuditor({ session_id: done.session_id }, { db, reader: rd.r, now: NOW, newId })
     if (r.type !== 'audit') throw new Error('expected audit')
-    expect(r.audit.decision).toBe('review')
+    expect(r.audit.decision).toBe('hold_suspicion')
     expect(r.audit.missing_components).toContain('formal terms')
     expect(r.audit.checks.find((c) => c.field === 'Returns')!.result).toBe('missing')
   })
 
-  it('gap: an unknown session gives no decision, no verdict and writes no receipt', async () => {
+  it('gap: an unknown session is Hold for Suspicion with the gap note and writes no receipt', async () => {
     const w = world()
     const r = await runAuditor({ session_id: '11111111-1111-4111-8111-111111111111' }, { db: w.auditorDb, reader: reader().r, now: NOW, newId })
     if (r.type !== 'audit') throw new Error('expected audit')
-    expect(r.audit.decision).toBeNull()
+    expect(r.audit.decision).toBe('hold_suspicion')
+    expect(r.attention).toBe(true)
     expect(r.audit.gap).toBe('Unverified agent, no AgentReceipt session opened, no receipt (gap recorded)')
     expect(w.tables.receipts).toHaveLength(0)
   })
 
-  it('isolation: reads one order, sends Spark only two short texts, and the receipt holds no chat, reasoning or card details', async () => {
+  it('isolation: reads one order, sends Spark only structured fields, and the receipt holds no chat, reasoning or card details', async () => {
     const w = world()
     const rd = reader()
     await placeOrder(w, { id: ORCA, ship: 'standard', said: 'Free returns' }, rd.r) // another order already on record
@@ -193,12 +200,13 @@ describe('auditor: live runs on stored records', () => {
     await runAuditor({ session_id: done.session_id }, { db: w.auditorDb, reader: rd.r, now: NOW, newId })
     expect(w.reads).toEqual([`grant:${done.session_id}`]) // only this order's grant is ever read
     expect(rd.sent).toEqual([]) // repeat call: nothing re-sent
-    expect(rd.sent.concat(...[])).toEqual([])
     // first-run input to Spark for the hero: exactly the agent's returns text and the formal terms text
     const fresh = world()
     const rd2 = reader()
     await placeOrder(fresh, { id: BURTON, ship: 'expedited', said: 'Easy returns' }, rd2.r)
-    expect(rd2.sent).toEqual([['Easy returns', 'Final Sale']])
+    expect(rd2.sent).toEqual([{ agent_summary_returns: 'Easy returns', agent_believed_terms: 'Easy returns', formal_returns: 'final_sale', formal_terms_text: 'Final Sale' }])
+    // Spark is never sent the chat or any proposal free text: structured fields and the delivery label only
+    expect(JSON.stringify([rd2.sent, rd2.sentDelivery])).not.toMatch(/weekend trip|looks cool|Looking for snowboards|Use my PayPal/i)
     const stored = JSON.stringify(fresh.tables.receipts)
     expect(stored).not.toMatch(/weekend trip|looks cool|Use my PayPal/i)
     expect(stored).not.toMatch(/mastercard|visa|••|\d{4} \d{4}/i)
@@ -212,27 +220,51 @@ describe('auditor: live runs on stored records', () => {
     const a = w.tables.receipts[0].audit as { semantic_source: string; problem_fields: string[]; decision: string }
     expect(a.semantic_source).toBe('rules-fallback')
     expect(a.problem_fields).toEqual(['Budget', 'Returns'])
-    expect(a.decision).toBe('hold')
+    expect(a.decision).toBe('review_required')
   })
 })
 
 describe('auditor: Muse Spark reader', () => {
   const ok = (content: string) => (async () => new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })) as unknown as typeof fetch
+  const IN: ReturnsIn = { agent_summary_returns: 'no-hassle returns', agent_believed_terms: 'no-hassle returns', formal_returns: 'final_sale', formal_terms_text: 'Final Sale' }
 
-  it('sends only the two short texts and uses the answer', async () => {
+  it('returns comparison sends only the structured fields and uses the answer', async () => {
     let body = ''
-    const f = (async (_u: string, init: RequestInit) => { body = String(init.body); return new Response(JSON.stringify({ choices: [{ message: { content: '{"believed_kind":"returnable"}' } }] }), { status: 200 }) }) as unknown as typeof fetch
-    const r = await createSparkReader('key', f).readReturns('Easy returns', 'Final Sale')
-    expect(r).toEqual({ believed_kind: 'returnable', source: 'muse-spark' })
+    const f = (async (_u: string, init: RequestInit) => { body = String(init.body); return new Response(JSON.stringify({ choices: [{ message: { content: '{"returns_summary_matches_terms": false, "reason": "Agent claims returns; terms are final sale."}' } }] }), { status: 200 }) }) as unknown as typeof fetch
+    const r = await createSparkReader('key', f).readReturns(IN)
+    expect(r).toEqual({ returns_summary_matches_terms: false, reason: 'Agent claims returns; terms are final sale.', source: 'muse-spark' })
     expect(body).toContain('"model":"muse-spark-1.3"')
-    expect(body).toContain('Easy returns')
-    expect(body).not.toMatch(/tool_calls|weekend|budget/i)
+    expect(body).toContain('no-hassle returns')
+    expect(body).not.toMatch(/tool_calls|weekend|budget|chat"/i)
   })
 
-  it('falls back, labelled, on no key, an error, or an unreadable answer', async () => {
-    expect(await createSparkReader(undefined).readReturns('Final sale', 'Final Sale')).toEqual({ believed_kind: 'final_sale', source: 'rules-fallback' })
-    expect(await createSparkReader('k', (async () => new Response('no', { status: 500 })) as unknown as typeof fetch).readReturns('Easy returns', 'x')).toMatchObject({ source: 'rules-fallback', believed_kind: 'returnable' })
-    expect(await createSparkReader('k', ok('I think it is fine')).readReturns('Easy returns', 'x')).toMatchObject({ source: 'rules-fallback' })
-    expect(await createSparkReader('k', (async () => { throw new Error('net') }) as unknown as typeof fetch).readReturns('See you soon', 'x')).toEqual({ believed_kind: 'unclear', source: 'rules-fallback' })
+  it('returns comparison falls back, labelled, on no key, an error, or an unreadable answer', async () => {
+    const final = { ...IN, agent_summary_returns: 'Final sale', agent_believed_terms: null }
+    expect(await createSparkReader(undefined).readReturns(final)).toMatchObject({ returns_summary_matches_terms: true, source: 'rules-fallback' })
+    expect(await createSparkReader('k', (async () => new Response('no', { status: 500 })) as unknown as typeof fetch).readReturns(IN)).toMatchObject({ returns_summary_matches_terms: false, source: 'rules-fallback' })
+    expect(await createSparkReader('k', ok('I think it is fine')).readReturns(IN)).toMatchObject({ source: 'rules-fallback' })
+    expect(await createSparkReader('k', (async () => { throw new Error('net') }) as unknown as typeof fetch).readReturns({ ...IN, agent_summary_returns: 'See you soon', agent_believed_terms: null })).toMatchObject({ returns_summary_matches_terms: null, source: 'rules-fallback' })
+  })
+
+  it('delivery: exact labels are read by code; only a loose phrase goes to Spark, which returns a date', async () => {
+    let calls = 0
+    const f = (async () => { calls += 1; return new Response(JSON.stringify({ choices: [{ message: { content: '{"claimed_date": "2026-10-30"}' } }] }), { status: 200 }) }) as unknown as typeof fetch
+    const sp = createSparkReader('key', f)
+    expect(await sp.readDelivery('Wed Oct 28', '2026-10-26')).toEqual({ claimed_date: '2026-10-28', source: 'rules-fallback' })
+    expect(calls).toBe(0)
+    expect(await sp.readDelivery('by this Friday', '2026-10-26')).toEqual({ claimed_date: '2026-10-30', source: 'muse-spark' })
+    expect(calls).toBe(1)
+    expect(await createSparkReader(undefined).readDelivery('by this Friday', '2026-10-26')).toEqual({ claimed_date: null, source: 'rules-fallback' })
+  })
+})
+
+describe('auditor privacy boundary (static)', () => {
+  it('the input builder never touches the chat, the chat hash or proposal free text', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync('supabase/functions/_shared/audit-input.ts', 'utf8').replace(/\/\/.*$/gm, '')
+    expect(src).not.toMatch(/private_chat|messages|transcript|grant_json|reasoning|steps/i)
+    const run = readFileSync('supabase/functions/auditor/run.ts', 'utf8').replace(/\/\/.*$/gm, '')
+    expect(run).not.toMatch(/private_chat|\.messages|transcript|grant_json|reasoning/i)
+    expect(readFileSync('supabase/functions/auditor/spark.ts', 'utf8')).not.toMatch(/from ['"]\.\.\/shopper-agent/)
   })
 })

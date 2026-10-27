@@ -70,7 +70,10 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(within(hero).getByText('Jemaih Soresky')).toBeInTheDocument()
     expect(within(hero).getByText('meta-muse-j0376672 (verified, simulated)')).toBeInTheDocument()
     expect(within(hero).getByText('Confirmed')).toBeInTheDocument()
-    expect(within(hero).getByText('Dispute received')).toBeInTheDocument()
+    // the hero is Review Required and NOT a dispute
+    expect(within(hero).getByText('Review Required')).toBeInTheDocument()
+    expect(within(hero).queryByText('Dispute received')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Orders requiring attention: 2')
     expect(within(hero).getByText('$509.95')).toBeInTheDocument()
 
     const b = screen.getByText('13422').closest('tr')!
@@ -80,7 +83,9 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
 
     const gap = screen.getByText('14522').closest('tr')!
     expect(within(gap).getByText('Unverified agent, no AgentReceipt session opened, no receipt (gap recorded)')).toBeInTheDocument()
+    expect(within(gap).getByText('Hold for Suspicion')).toBeInTheDocument()
     expect(within(gap).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(b).getByText('Pass')).toBeInTheDocument()
 
     await user.click(within(hero).getByRole('button', { name: /show check/i }))
     const th = screen.getAllByRole('columnheader').map((c) => c.textContent)
@@ -91,14 +96,12 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(screen.getByText(/VI-aligned demo representation/)).toBeInTheDocument()
   })
 
-  it('Disputes shows 12322 as received and 13422 as won with a clean receipt', async () => {
+  it('Disputes shows only the separate Orca order 13422 (won, clean receipt); the Review Required hero is not a dispute', async () => {
     open('/dashboard/disputes')
-    expect(await screen.findByText('AR-2026-0042')).toBeInTheDocument()
-    expect(screen.getAllByText('Dispute received').length).toBeGreaterThan(0)
-    expect(screen.getByText('AR-2026-0043')).toBeInTheDocument()
+    expect(await screen.findByText('AR-2026-0043')).toBeInTheDocument()
+    expect(screen.queryByText('AR-2026-0042')).not.toBeInTheDocument()
     expect(screen.getAllByText('Won').length).toBeGreaterThan(0)
     expect(screen.getByText(/Claimed agent overstep/)).toBeInTheDocument()
-    expect(screen.getByText('2 problems found')).toBeInTheDocument()
     expect(screen.getByText('0 problems found')).toBeInTheDocument()
     expect(screen.getAllByText('– Not specified').length).toBeGreaterThan(0)
   })
@@ -107,7 +110,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     const user = userEvent.setup()
     open('/dashboard/tamper')
     await user.click(await screen.findByRole('button', { name: 'Verify chain' }))
-    expect(await screen.findByText(/original verified: 17 entries/i)).toBeInTheDocument()
+    expect(await screen.findByText(/original verified: 16 entries/i)).toBeInTheDocument()
 
     expect(screen.getByRole('option', { name: 'AR-2026-0041', selected: true })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Tamper with the amount' }))

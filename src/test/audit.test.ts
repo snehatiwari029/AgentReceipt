@@ -6,19 +6,19 @@ const okHash = { grant_ok: true, proposal_ok: true, action_ok: true, links_ok: t
 const grant = (over: Partial<GrantIn> = {}): GrantIn => ({
   merchant_allowlist: ['Northwind Outfitters'], product_scope: 'snowboard', amount_max_cents: 50000, budget_limit_cents: 50000,
   size_min_cm: 150, size_max_cm: 165, colour_preference: null, delivery_by: '2026-10-30', return_policy_required: true,
-  payment_method_ref: 'Demo Checkout', sealed_at: '2026-10-26T17:05:00.000Z', expires_at: '2026-10-27T17:05:00.000Z', ...over,
+  payment_method_ref: 'Demo Checkout', sealed_at: '2026-10-26T17:05:00.000Z', expires_at: '2026-10-27T17:05:00.000Z', agent_verified: true, ...over,
 })
 
 const hero = (over: Partial<ActionIn> = {}): ActionIn => ({
   product_category: 'snowboard', merchant: 'Northwind Outfitters', colour: 'Serpent', size_cm: 156, item_price_cents: 44995,
   shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', sealed_at: '2026-10-26T17:11:00.000Z',
-  payment_method_ref: 'Demo Checkout', agent_summary_returns: 'Easy returns', agent_believed_returns: 'Easy returns', ...over,
+  payment_method_ref: 'Demo Checkout', agent_summary_returns: 'Easy returns', agent_summary_delivery: null, agent_believed_returns: 'Easy returns', ...over,
 })
 
 const orca = (over: Partial<ActionIn> = {}): ActionIn => ({
   product_category: 'snowboard', merchant: 'Northwind Outfitters', colour: null, size_cm: 156, item_price_cents: 48983,
   shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', sealed_at: '2026-10-26T18:06:00.000Z',
-  payment_method_ref: 'Demo Checkout', agent_summary_returns: 'Free returns', agent_believed_returns: 'Free returns', ...over,
+  payment_method_ref: 'Demo Checkout', agent_summary_returns: 'Free returns', agent_summary_delivery: null, agent_believed_returns: 'Free returns', ...over,
 })
 
 const finalSale = { formal_returns: 'final_sale' as const, formal_terms_text: 'Final Sale' }
@@ -30,10 +30,10 @@ const input = (over: Partial<AuditInput> = {}): AuditInput => ({
 
 const result = (r: ReturnType<typeof audit>, field: string) => r.checks.find((c) => c.field === field)!
 
-describe('detection engine: PASS / HOLD / REVIEW', () => {
-  it('hero 12322: exactly 2 problems (Budget, Returns) and HOLD', () => {
+describe('detection engine: Pass / Review Required / Hold for Suspicion', () => {
+  it('hero 12322: exactly 2 problems (Budget, Returns) and Review Required', () => {
     const r = audit(input())
-    expect(r.decision).toBe('hold')
+    expect(r.decision).toBe('review_required')
     expect(r.problems).toBe(2)
     expect(r.problem_fields).toEqual(['Budget', 'Returns'])
     expect(r.missing_components).toEqual([])
@@ -82,7 +82,7 @@ describe('detection engine: PASS / HOLD / REVIEW', () => {
   it('specified colour must match exactly', () => {
     const r = audit(input({ grant: grant({ colour_preference: 'Black' }), action: orca({ colour: 'Serpent' }), terms: freeReturns }))
     expect(result(r, 'Colour').result).toBe('mismatch')
-    expect(r.decision).toBe('hold')
+    expect(r.decision).toBe('review_required')
   })
 
   it('Returns: Final sale fails even when the agent said "Easy returns"; free returns with a matching summary passes', () => {
@@ -101,11 +101,11 @@ describe('detection engine: PASS / HOLD / REVIEW', () => {
     const r = audit(input({ grant: grant({ return_policy_required: null }) }))
     expect(result(r, 'Returns').result).toBe('unspecified')
     expect(r.problem_fields).toEqual(['Budget']) // the live 2-day prompt has no returns rule: 1 problem
-    expect(r.decision).toBe('hold')
+    expect(r.decision).toBe('review_required')
   })
 
   it('Returns: the semantic read from Muse Spark is used when given, and reported', () => {
-    const r = audit(input({ terms: freeReturns, action: orca({ agent_believed_returns: 'ok to send back within a month' }), semantic_returns: { believed_kind: 'returnable', source: 'muse-spark' } }))
+    const r = audit(input({ terms: freeReturns, action: orca({ agent_believed_returns: 'ok to send back within a month' }), semantic_returns: { returns_summary_matches_terms: true, reason: 'Both claim returns.', source: 'muse-spark' } }))
     expect(result(r, 'Returns').result).toBe('match')
     expect(r.semantic_source).toBe('muse-spark')
   })
@@ -133,18 +133,19 @@ describe('detection engine: PASS / HOLD / REVIEW', () => {
     expect(JSON.stringify(audit(input()))).not.toMatch(/mastercard|visa|••|paypal/i)
   })
 
-  it('expired grant: action sealed after expires_at is HOLD with the expired cause', () => {
+  it('expired grant: action sealed after expires_at is Hold for Suspicion with the expired cause', () => {
     const r = audit(input({ action: orca({ sealed_at: '2026-10-28T09:00:00.000Z' }), terms: freeReturns }))
-    expect(r.decision).toBe('hold')
+    expect(r.decision).toBe('hold_suspicion')
+    expect(r.suspicion_reasons).toContain('grant expired before the action')
     expect(result(r, 'Grant validity')).toMatchObject({ result: 'mismatch', cause: 'Action after grant validity expired' })
   })
 
-  it('missing formal terms: REVIEW, terms listed as missing, Returns is neither passed nor failed', () => {
+  it('missing formal terms: Hold for Suspicion, terms listed as missing, Returns is neither passed nor failed', () => {
     const r = audit(input({ terms: null }))
-    expect(r.decision).toBe('review')
+    expect(r.decision).toBe('hold_suspicion')
     expect(r.missing_components).toContain('formal terms')
     expect(result(r, 'Returns').result).toBe('missing')
-    expect(r.flag).toBe('Merchant review needed — record incomplete / tamper check failed')
+    expect(r.flag).toBe('Hold for Suspicion — investigate the record or agent first')
     expect(requiresAttention(r.decision)).toBe(true)
   })
 
@@ -152,22 +153,22 @@ describe('detection engine: PASS / HOLD / REVIEW', () => {
     expect(audit(input({ terms: { formal_returns: 'free', formal_terms_text: null } })).missing_components).toContain('formal terms')
   })
 
-  it('each missing record component forces REVIEW, whatever the problem count', () => {
+  it('each missing record component forces Hold for Suspicion, whatever the problem count', () => {
     expect(audit(input({ proposal_present: false })).missing_components).toContain('proposal record')
     expect(audit(input({ hash: null })).missing_components).toContain('hash record')
     expect(audit(input({ action: null })).missing_components).toContain('action record')
     expect(audit(input({ grant: null })).missing_components).toContain('grant record')
-    for (const r of [audit(input({ proposal_present: false })), audit(input({ hash: null })), audit(input({ action: null }))]) expect(r.decision).toBe('review')
-    // an order that would be HOLD with 2 problems is still REVIEW if a component is missing
+    for (const r of [audit(input({ proposal_present: false })), audit(input({ hash: null })), audit(input({ action: null }))]) expect(r.decision).toBe('hold_suspicion')
+    // an order that would be Review Required with 2 problems is still Hold for Suspicion if a component is missing
     const r = audit(input({ proposal_present: false }))
     expect(r.problems).toBe(2)
-    expect(r.decision).toBe('review')
+    expect(r.decision).toBe('hold_suspicion')
   })
 
   it('a missing or inexact timestamp is a missing component, not a pass or fail', () => {
     expect(audit(input({ action: hero({ sealed_at: null }) })).missing_components).toContain('action sealed_at')
-    expect(audit(input({ action: hero({ sealed_at: 'now' }) })).decision).toBe('review')
-    expect(audit(input({ action: hero({ sealed_at: '2026-10-26' }) })).decision).toBe('review')
+    expect(audit(input({ action: hero({ sealed_at: 'now' }) })).decision).toBe('hold_suspicion')
+    expect(audit(input({ action: hero({ sealed_at: '2026-10-26' }) })).decision).toBe('hold_suspicion')
     expect(audit(input({ grant: grant({ sealed_at: null }) })).missing_components).toContain('grant sealed_at')
   })
 
@@ -177,33 +178,73 @@ describe('detection engine: PASS / HOLD / REVIEW', () => {
     expect(r.decision).toBe('pass')
   })
 
-  it('tamper: any failed hash recomputation is REVIEW, flagged, and never a pass', () => {
+  it('tamper: any failed hash recomputation is Hold for Suspicion, flagged, and never a pass', () => {
     const clean = audit(input({ grant: grant({ return_policy_required: null }), action: hero({ shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-29' }), terms: finalSale }))
     expect(clean.decision).toBe('pass') // original $449.95 verifies
     for (const bad of [{ ...okHash, action_ok: false }, { ...okHash, grant_ok: false }, { ...okHash, links_ok: false }, { ...okHash, proposal_ok: false }]) {
       const r = audit(input({ grant: grant({ return_policy_required: null }), action: hero({ shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-29' }), hash: bad }))
-      expect(r.decision).toBe('review')
+      expect(r.decision).toBe('hold_suspicion')
       expect(r.tamper_failed).toBe(true)
-      expect(r.flag).toBe('Merchant review needed — record incomplete / tamper check failed')
+      expect(r.flag).toBe('Hold for Suspicion — investigate the record or agent first')
     }
   })
 
-  it('gap 14522: no session, grant, action or receipt gives no decision and no verdict', () => {
+  it('gap 14522: no session, grant, action or receipt is Hold for Suspicion (unverified agent), with the gap note', () => {
     const r = audit({ session_opened: false, grant: null, action: null, terms: null, proposal_present: false, hash: null })
-    expect(r.decision).toBeNull()
+    expect(r.decision).toBe('hold_suspicion')
     expect(r.checks).toEqual([])
     expect(r.gap).toBe(GAP_NOTE)
-    expect(requiresAttention(r.decision)).toBe(false)
+    expect(r.suspicion_reasons).toContain('unverified agent, no AgentReceipt session')
+    expect(requiresAttention(r.decision)).toBe(true)
   })
 
   it('output is structured JSON only: no free-text verdict field', () => {
     const r = audit(input())
-    expect(Object.keys(r).sort()).toEqual(['checks', 'decision', 'flag', 'footer', 'gap', 'merchant_action', 'missing_components', 'note', 'problem_fields', 'problems', 'semantic_source', 'tamper_failed'])
+    expect(Object.keys(r).sort()).toEqual(['agent_summary', 'checks', 'decision', 'flag', 'footer', 'gap', 'merchant_action', 'missing_components', 'note', 'problem_fields', 'problems', 'semantic_source', 'suspicion_reasons', 'tamper_failed'])
     expect(JSON.parse(JSON.stringify(r))).toEqual(r)
     expect(JSON.stringify(r)).not.toMatch(/liab(le|ility) (is|rests|falls)/i)
   })
 
   it('checks run in the specified order', () => {
     expect(audit(input()).checks.map((c) => c.field)).toEqual(['Product', 'Budget', 'Delivery', 'Colour', 'Size', 'Merchant', 'Payment method', 'Returns', 'Grant validity'])
+  })
+
+  it('unverified agent on the grant is Hold for Suspicion even with 0 problems', () => {
+    const r = audit(input({ grant: grant({ agent_verified: false, return_policy_required: null }), action: hero({ shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-29' }) }))
+    expect(r.problems).toBe(0)
+    expect(r.decision).toBe('hold_suspicion')
+    expect(r.suspicion_reasons).toEqual(['unverified agent'])
+  })
+
+  it('Review Required means the record is trusted: no suspicion reasons, no missing components', () => {
+    const r = audit(input())
+    expect(r.decision).toBe('review_required')
+    expect(r.suspicion_reasons).toEqual([])
+    expect(r.note).toBe(RECOMMENDS_NOTE)
+  })
+
+  it('Returns: Spark says the agent claim does NOT match the terms, so a free-returns product still fails', () => {
+    const r = audit(input({ terms: freeReturns, action: orca({ agent_summary_returns: 'all sales final, sorry', agent_believed_returns: 'all sales final, sorry' }), semantic_returns: { returns_summary_matches_terms: false, reason: 'Agent says no returns; terms allow them.', source: 'muse-spark' } }))
+    expect(result(r, 'Returns').result).toBe('mismatch')
+    expect(r.agent_summary?.returns_reason).toBe('Agent says no returns; terms allow them.')
+  })
+
+  it('Returns: a claim Spark reads as matching ("no-hassle returns") passes against free returns; the keyword fallback does the same', () => {
+    const sem = { returns_summary_matches_terms: true, reason: 'Both claim returns.', source: 'muse-spark' as const }
+    expect(result(audit(input({ terms: freeReturns, action: orca({ agent_summary_returns: 'no-hassle returns' }), semantic_returns: sem })), 'Returns').result).toBe('match')
+    expect(result(audit(input({ terms: freeReturns, action: orca({ agent_summary_returns: 'no-hassle returns' }) })), 'Returns').result).toBe('match')
+  })
+
+  it('Delivery: an arrival date the agent told the customer must equal the real arrival (agent claim vs store)', () => {
+    const wrong = audit(input({ terms: freeReturns, action: orca({ agent_summary_delivery: 'Fri Oct 30' }), semantic_delivery: { claimed_date: '2026-10-30', source: 'rules-fallback' } }))
+    expect(result(wrong, 'Delivery')).toMatchObject({ result: 'mismatch', cause: 'Agent told the customer arrival Fri 30 Oct 2026; the order arrives Thu 29 Oct 2026' })
+    const right = audit(input({ terms: freeReturns, action: orca({ agent_summary_delivery: 'Thu Oct 29' }), semantic_delivery: { claimed_date: '2026-10-29', source: 'rules-fallback' } }))
+    expect(result(right, 'Delivery').result).toBe('match')
+  })
+
+  it('the audit output carries only structured agent fields: no chat, no proposal text', () => {
+    const r = audit(input({ action: orca({ agent_summary_delivery: 'Thu Oct 29' }), terms: freeReturns }))
+    expect(Object.keys(r.agent_summary ?? {}).sort()).toEqual(['agent_believed_terms', 'agent_summary_delivery', 'agent_summary_returns', 'delivery_claimed_date', 'delivery_source', 'returns_reason', 'returns_summary_matches_terms'])
+    expect(JSON.stringify(r)).not.toMatch(/"(chat|messages|proposal_text|transcript)"/)
   })
 })

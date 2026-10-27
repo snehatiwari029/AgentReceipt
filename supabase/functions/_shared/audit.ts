@@ -1,29 +1,35 @@
 // AgentReceipt detection engine. Pure TypeScript, no Deno or browser APIs, so the edge function, the seed script,
 // the tests and (later) the dashboard can all run the same rules.
 //
-// It decides PASS / HOLD / REVIEW at order received, before fulfillment. It is the ONLY place these rules live.
+// It decides PASS / REVIEW REQUIRED / HOLD FOR SUSPICION at order received, before fulfillment. It is the ONLY place these rules live.
+//   Review Required   = "I trust the record, I don't trust the match."  (>= 1 field mismatch; hashes verify; all components present)
+//   Hold for Suspicion = "I don't trust the record itself yet."        (hash fails, component missing, grant expired before the action, agent unverified)
 //
 // HONEST SCOPE: AgentReceipt does not block checkout, payment or shipment. It returns a recommendation (a signal).
-// "AgentReceipt recommends hold; your order system holds shipment/capture."
+// The merchant's order system holds shipment/capture; AgentReceipt only recommends.
 //
-// INPUTS (and nothing else): grant fields, the merchant's formal terms, the action record, the agent's structured
-// believed terms, and hash-check results with timestamps. Never the customer chat, never shopper reasoning, never
-// dispute or tamper-page data, never another order's grant.
+// INPUTS (and nothing else): grant fields, the merchant's formal terms, the action record, the agent's STRUCTURED
+// summary fields (agent_summary_returns, agent_summary_delivery, agent_believed_terms) and hash-check results with
+// timestamps. Never the customer chat, never proposal free text, never shopper reasoning, never dispute or
+// tamper-page data, never another order's grant.
 // OUTPUT: structured JSON only (AuditResult). The dashboard renders it. There is no free-text verdict.
 //
 // A model never takes part in this file: no model call, no hash generated here.
 
 export const MERCHANT_FOOTER =
   'AgentReceipt shows mismatch facts only; it does not decide liability and no network rule moves liability on this screen.'
-export const RECOMMENDS_NOTE = 'AgentReceipt recommends hold; your order system holds shipment/capture.'
+export const RECOMMENDS_NOTE = 'AgentReceipt recommends review before shipping; your order system holds shipment/capture.'
+export const SUSPICION_NOTE = 'AgentReceipt recommends holding for investigation; your order system holds shipment/capture.'
 export const GAP_NOTE = 'Unverified agent, no AgentReceipt session opened, no receipt (gap recorded)'
 export const PAYMENT_REF = 'Demo Checkout'
 
-export type Decision = 'pass' | 'hold' | 'review'
+export type Decision = 'pass' | 'review_required' | 'hold_suspicion'
+export const DECISION_LABEL: Record<Decision, string> = { pass: 'Pass', review_required: 'Review Required', hold_suspicion: 'Hold for Suspicion' }
 export type CheckResult = 'match' | 'mismatch' | 'unspecified' | 'missing'
 
 export type GrantIn = {
   merchant_allowlist: string[]
+  agent_verified: boolean | null // false = unverified agent
   product_scope: string | null
   amount_max_cents: number | null
   budget_limit_cents: number | null
@@ -48,7 +54,8 @@ export type ActionIn = {
   delivery_date: string | null // exact date YYYY-MM-DD, from the store's shipping data
   sealed_at: string | null
   payment_method_ref: string | null
-  agent_summary_returns: string | null
+  agent_summary_returns: string | null // structured field the shopper set on its proposal record
+  agent_summary_delivery: string | null // structured field the shopper set on its proposal record
   agent_believed_returns: string | null // structured field from agent_believed_terms.returns
 }
 
@@ -60,9 +67,12 @@ export type TermsIn = {
 // Results of hash recomputation done elsewhere (verify.ts). null = could not be checked.
 export type HashIn = { grant_ok: boolean | null; proposal_ok: boolean | null; action_ok: boolean | null; links_ok: boolean | null }
 
-// The semantic read of the agent's believed returns text. Produced by Muse Spark in the auditor function (with a
-// plain keyword fallback), so the rules below stay deterministic: the model reads one phrase, it never decides the verdict.
-export type SemanticReturns = { believed_kind: 'returnable' | 'final_sale' | 'unclear'; source: 'muse-spark' | 'rules-fallback' }
+// Spark call 3: do the agent's STRUCTURED returns fields and the merchant's formal terms say the same thing?
+// Spark answers the language question only; the rules below make the match and decide the verdict.
+// matches === null means "could not tell" and the plain keyword reading is used instead.
+export type SemanticReturns = { returns_summary_matches_terms: boolean | null; reason: string; source: 'muse-spark' | 'rules-fallback' }
+// Spark call 4: the agent's delivery phrase (for example "Wed Oct 28") rewritten as an exact date. Code compares dates.
+export type SemanticDelivery = { claimed_date: string | null; source: 'muse-spark' | 'rules-fallback' }
 
 export type AuditInput = {
   session_opened: boolean
@@ -72,6 +82,7 @@ export type AuditInput = {
   proposal_present: boolean
   hash: HashIn | null
   semantic_returns?: SemanticReturns | null
+  semantic_delivery?: SemanticDelivery | null
 }
 
 export type Check = {
@@ -89,7 +100,7 @@ export type Check = {
 }
 
 export type AuditResult = {
-  decision: Decision | null // null only for a gap: no session, no grant, no action, no receipt
+  decision: Decision // a gap (no session, no grant, no action, no receipt) is Hold for Suspicion with `gap` set
   problems: number
   problem_fields: string[]
   missing_components: string[]
@@ -100,6 +111,17 @@ export type AuditResult = {
   note: string | null
   gap: string | null
   semantic_source: 'muse-spark' | 'rules-fallback' | null
+  suspicion_reasons: string[] // why the record itself is not trusted (empty for Pass / Review Required)
+  // The only agent-written fields the auditor saw, plus what Spark said about them. No chat, no proposal text.
+  agent_summary: {
+    agent_summary_returns: string | null
+    agent_summary_delivery: string | null
+    agent_believed_terms: string | null
+    returns_summary_matches_terms: boolean | null
+    returns_reason: string | null
+    delivery_claimed_date: string | null
+    delivery_source: 'muse-spark' | 'rules-fallback' | null
+  } | null
   footer: string
 }
 
@@ -153,8 +175,10 @@ export function audit(input: AuditInput): AuditResult {
   // A gap: nothing was recorded at all. No decision is invented for it.
   if (!input.session_opened && !grant && !action && !input.hash) {
     return {
-      decision: null, problems: 0, problem_fields: [], missing_components: [], tamper_failed: false, checks: [],
-      merchant_action: null, flag: null, note: null, gap: GAP_NOTE, semantic_source: null, footer: MERCHANT_FOOTER,
+      decision: 'hold_suspicion', problems: 0, problem_fields: [], missing_components: [], tamper_failed: false, checks: [],
+      merchant_action: 'Do not proceed. Investigate the agent first.', flag: 'Hold for Suspicion — unverified agent, no record',
+      note: SUSPICION_NOTE, gap: GAP_NOTE, semantic_source: null, suspicion_reasons: ['unverified agent, no AgentReceipt session'],
+      agent_summary: null, footer: MERCHANT_FOOTER,
     }
   }
 
@@ -208,19 +232,30 @@ export function audit(input: AuditInput): AuditResult {
       }
     }
 
-    // 3. Delivery: exact dates, taken from the store's shipping data.
-    if (!g.delivery_by) checks.push(unspecified('delivery', 'Delivery', null, a.delivery_date && isDate(a.delivery_date) ? dateLabel(a.delivery_date) : null, ['delivery_by']))
-    else if (!isDate(a.delivery_date)) {
-      missing.push('action delivery_date')
-      checks.push(check('delivery', 'Delivery', 'missing', { grant: `By ${dateLabel(g.delivery_by)}`, terms: null, actual: null }, ['delivery_by']))
-    } else {
-      const parts = { grant: `By ${dateLabel(g.delivery_by)}`, terms: null, actual: dateLabel(a.delivery_date) }
-      if (a.delivery_date <= g.delivery_by) checks.push(check('delivery', 'Delivery', 'match', parts, ['delivery_by']))
-      else {
-        checks.push(check('delivery', 'Delivery', 'mismatch', parts, ['delivery_by'], {
-          cause: `Delivery ${dateLabel(a.delivery_date)} is after the ${dateLabel(g.delivery_by)} deadline`,
-          next_action: 'Merchant reviews — confirm later delivery date with customer, or choose faster shipping',
-        }))
+    // 3. Delivery: exact dates, taken from the store's shipping data. Also: the arrival the agent TOLD the customer
+    //    (its structured delivery field, rewritten as a date by Spark or the fallback) must equal the real arrival.
+    {
+      const claimed = input.semantic_delivery?.claimed_date ?? null
+      const claimWrong = !!claimed && isDate(claimed) && isDate(a.delivery_date) && claimed !== a.delivery_date
+      const claimCause = claimWrong ? `Agent told the customer arrival ${dateLabel(claimed as string)}; the order arrives ${dateLabel(a.delivery_date as string)}` : null
+      const claimNext = 'Merchant reviews — confirm the arrival date with the customer, or cancel / adjust order'
+      if (!g.delivery_by) {
+        checks.push(claimWrong
+          ? check('delivery', 'Delivery', 'mismatch', { grant: null, terms: null, actual: dateLabel(a.delivery_date as string) }, ['delivery_by'], { cause: claimCause as string, next_action: claimNext })
+          : unspecified('delivery', 'Delivery', null, a.delivery_date && isDate(a.delivery_date) ? dateLabel(a.delivery_date) : null, ['delivery_by']))
+      } else if (!isDate(a.delivery_date)) {
+        missing.push('action delivery_date')
+        checks.push(check('delivery', 'Delivery', 'missing', { grant: `By ${dateLabel(g.delivery_by)}`, terms: null, actual: null }, ['delivery_by']))
+      } else {
+        const parts = { grant: `By ${dateLabel(g.delivery_by)}`, terms: null, actual: dateLabel(a.delivery_date) }
+        if (a.delivery_date > g.delivery_by) {
+          checks.push(check('delivery', 'Delivery', 'mismatch', parts, ['delivery_by'], {
+            cause: `Delivery ${dateLabel(a.delivery_date)} is after the ${dateLabel(g.delivery_by)} deadline`,
+            next_action: 'Merchant reviews — confirm later delivery date with customer, or choose faster shipping',
+          }))
+        } else if (claimWrong) {
+          checks.push(check('delivery', 'Delivery', 'mismatch', parts, ['delivery_by'], { cause: claimCause as string, next_action: claimNext }))
+        } else checks.push(check('delivery', 'Delivery', 'match', parts, ['delivery_by']))
       }
     }
 
@@ -283,30 +318,34 @@ export function audit(input: AuditInput): AuditResult {
       }
     }
 
-    // 8. Return / exchange: grant vs formal terms vs the agent's structured believed terms.
+    // 8. Return / exchange: grant vs formal terms vs the agent's STRUCTURED summary fields.
     if (g.return_policy_required !== true) {
       checks.push(unspecified('returns', 'Returns', terms?.formal_terms_text ?? null, a.agent_believed_returns ?? a.agent_summary_returns, ['return_policy_required']))
     } else if (!terms || !terms.formal_returns || !terms.formal_terms_text) {
       // Terms are missing: this is a missing component, never a pass or a fail on Returns.
-      checks.push(check('returns', 'Returns', 'missing', { grant: 'Returnable required', terms: null, actual: a.agent_believed_returns ?? a.agent_summary_returns }, ['return_policy_required']))
+      checks.push(check('returns', 'Returns', 'missing', { grant: 'Returnable required', terms: null, actual: a.agent_summary_returns ?? a.agent_believed_returns }, ['return_policy_required']))
     } else {
-      const said = a.agent_believed_returns ?? a.agent_summary_returns
+      const said = a.agent_summary_returns ?? a.agent_believed_returns
       const formal = kindOfFormal(terms.formal_returns)
       const sem = input.semantic_returns
-      const believed: Kind = sem ? (sem.believed_kind === 'unclear' ? null : sem.believed_kind) : kindOfText(said)
+      // Does the agent's claim say what the formal terms say? Spark's answer when it gave one; otherwise the keyword reading.
+      const sameAsTerms: boolean | null = sem && sem.returns_summary_matches_terms !== null
+        ? sem.returns_summary_matches_terms
+        : (() => { const k = kindOfText(said); return k === null ? null : k === formal })()
       const parts = { grant: 'Returnable required', terms: terms.formal_terms_text, actual: said ? `Agent summary "${said}"` : null }
+      const next = `Merchant reviews — confirm ${terms.formal_terms_text} terms with customer, or cancel / offer returnable alternative`
       if (formal === 'final_sale') {
         // Final sale fails, even when the agent told the customer "Easy returns".
         checks.push(check('returns', 'Returns', 'mismatch', parts, ['return_policy_required'], {
-          cause: believed === 'returnable' && said
+          cause: sameAsTerms === false && said
             ? `Agent summary "${said}" misrepresented the formal terms ("${terms.formal_terms_text}")`
             : `Grant requires returnable; formal terms are "${terms.formal_terms_text}"`,
-          next_action: `Merchant reviews — confirm ${terms.formal_terms_text} terms with customer, or cancel / offer returnable alternative`,
+          next_action: next,
         }))
-      } else if (believed !== null && believed !== formal) {
+      } else if (sameAsTerms === false) {
         checks.push(check('returns', 'Returns', 'mismatch', parts, ['return_policy_required'], {
           cause: `Agent summary "${said}" misrepresented the formal terms ("${terms.formal_terms_text}")`,
-          next_action: `Merchant reviews — confirm ${terms.formal_terms_text} terms with customer, or cancel / offer returnable alternative`,
+          next_action: next,
         }))
       } else {
         checks.push(check('returns', 'Returns', 'match', parts, ['return_policy_required']))
@@ -342,28 +381,47 @@ export function audit(input: AuditInput): AuditResult {
   const missing_components = [...new Set(missing)]
   const problems = problem_fields.length
 
-  // ----- decision: exactly these three outcomes at this stage -----
+  // Hold for Suspicion = the RECORD is not trusted: hash fails, a component is missing, the grant had expired before
+  // the action, or the agent is unverified. Review Required = the record is trusted but the MATCH is not.
+  const suspicion_reasons: string[] = []
+  if (tamper_failed) suspicion_reasons.push('hash verification failed')
+  if (missing_components.length > 0) suspicion_reasons.push(`missing record: ${missing_components.join(', ')}`)
+  if (checks.some((c) => c.key === 'validity' && c.result === 'mismatch')) suspicion_reasons.push('grant expired before the action')
+  if (grant && grant.agent_verified === false) suspicion_reasons.push('unverified agent')
+
+  // ----- decision: exactly these three outcomes -----
   let decision: Decision
-  if (missing_components.length > 0 || tamper_failed) decision = 'review'
-  else if (problems >= 1) decision = 'hold'
+  if (suspicion_reasons.length > 0) decision = 'hold_suspicion'
+  else if (problems >= 1) decision = 'review_required'
   else decision = 'pass'
+
+  const sr = input.semantic_returns
+  const sd = input.semantic_delivery
+  const agent_summary = a
+    ? {
+      agent_summary_returns: a.agent_summary_returns, agent_summary_delivery: a.agent_summary_delivery, agent_believed_terms: a.agent_believed_returns,
+      returns_summary_matches_terms: sr ? sr.returns_summary_matches_terms : null, returns_reason: sr ? sr.reason : null,
+      delivery_claimed_date: sd ? sd.claimed_date : null, delivery_source: sd ? sd.source : null,
+    }
+    : null
 
   return {
     decision, problems, problem_fields, missing_components, tamper_failed, checks,
     merchant_action:
       decision === 'pass' ? 'Proceed — ship / finalize capture. No review needed.'
-        : decision === 'hold' ? 'Do not ship and do not finalize capture yet. Merchant review needed.'
-          : 'Do not proceed until the missing or tampered record is resolved.',
+        : decision === 'review_required' ? 'Do not ship yet. Merchant review needed before fulfillment.'
+          : 'Do not proceed. Investigate the record or the agent first.',
     flag:
       decision === 'pass' ? null
-        : decision === 'hold' ? 'Merchant review needed'
-          : 'Merchant review needed — record incomplete / tamper check failed',
-    note: decision === 'pass' ? null : RECOMMENDS_NOTE,
+        : decision === 'review_required' ? 'Merchant review needed'
+          : 'Hold for Suspicion — investigate the record or agent first',
+    note: decision === 'pass' ? null : decision === 'review_required' ? RECOMMENDS_NOTE : SUSPICION_NOTE,
     gap: null,
-    semantic_source: input.semantic_returns?.source ?? null,
+    semantic_source: sr?.source ?? null,
+    suspicion_reasons, agent_summary,
     footer: MERCHANT_FOOTER,
   }
 }
 
 // Orders requiring attention = HOLD or REVIEW. A dispute is not needed to flag an order.
-export const requiresAttention = (d: Decision | null): boolean => d === 'hold' || d === 'review'
+export const requiresAttention = (d: Decision | null): boolean => d === 'review_required' || d === 'hold_suspicion'

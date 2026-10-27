@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { GENESIS_HASH, computeEntryHash, canonicalJson } from '../supabase/functions/_shared/hash'
 import { audit } from '../supabase/functions/_shared/audit'
 import { auditInputFromRecords } from '../supabase/functions/_shared/audit-input'
+import { parseExactDeliveryPhrase } from '../supabase/functions/auditor/spark'
 
 // Ids of this Supabase project's existing rows (read once from the database). The seed SQL checks
 // them before inserting and stops with a clear error if they differ.
@@ -74,7 +75,7 @@ type Scenario = {
   terms: Row
   summary: Row
   fulfillment: 'proceed' | 'held' | 'shipped_override'
-  recommendation: 'represent' | 'concede'
+  recommendation: 'represent' | 'concede' | null // post-dispute only; null when no dispute exists
 }
 
 
@@ -120,6 +121,7 @@ async function build(s: Scenario) {
     product: { category: s.terms.category as string, formal_returns: s.terms.formal_returns as string, formal_terms_text: s.terms.formal_terms_text as string, merchant_name: s.terms.merchant as string },
     merchant_name: 'Northwind Outfitters',
     hash: { grant_ok: true, proposal_ok: true, action_ok: true, links_ok: true },
+    semantic_delivery: { claimed_date: parseExactDeliveryPhrase(s.proposal.delivery, '2026-10-26'), source: 'rules-fallback' },
   }))
   const receipt = await chain('receipts', 'receipt', {
     id: rid, receipt_ref: s.receipt_ref, order_ref: s.order_ref, grant_id: gid, proposal_id: pid, merchant_id: MERCHANT_ID,
@@ -138,7 +140,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
   const burtonTerms = {
     merchant: 'Northwind Outfitters', category: 'snowboard', product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton',
     size_cm: 156, colour: 'Serpent', price_cents: 44995, formal_returns: 'final_sale', formal_terms_text: 'Final Sale',
-    terms_version: 'v1', standard_shipping_cents: 0, standard_delivery_days: 5, expedited_shipping_cents: 6000, expedited_delivery_days: 4,
+    terms_version: 'v1', standard_shipping_cents: 0, standard_delivery_days: 5, expedited_shipping_cents: 6000, expedited_delivery_days: 2,
   }
   const orcaTerms = {
     merchant: 'Northwind Outfitters', category: 'snowboard', product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech',
@@ -151,7 +153,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     key: '0041', order_ref: null, receipt_ref: 'AR-2026-0041', shopper: 'Ivan Dijkstra', agent: 'instinct-kk14680',
     at: { grant: '13:00', proposal: '13:04', action: '13:06', receipt: '13:07' },
     grant: { product_scope: 'snowboard', colour: null, return_required: null, delivery_by: null },
-    proposal: { product: BURTON_ID, item: 44995, total: 44995, returns: 'Final sale', delivery: 'Standard, 5 days' },
+    proposal: { product: BURTON_ID, item: 44995, total: 44995, returns: 'Final sale', delivery: 'Sat Oct 31' },
     action: {
       detail: { product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'standard', shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-31', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Final sale' } },
       believed: { returns: 'Final sale' },
@@ -162,31 +164,30 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     recommendation: 'represent',
   })
 
-  // 2) Hero order 12322 / AR-2026-0042: agent oversteps, 2 problems.
-  const hero = await build({
+  // 2) Hero order 12322 / AR-2026-0042: the 2-day prompt. Burton + expedited = $509.95, Final Sale. Review Required, 2 problems.
+  //    NO dispute: review before fulfillment prevents it. The order is held, not shipped.
+  await build({
     key: '12322', order_ref: '12322', receipt_ref: 'AR-2026-0042', shopper: 'Jemaih Soresky', agent: 'meta-muse-j0376672',
     at: { grant: '17:05', proposal: '17:09', action: '17:11', receipt: '17:12' },
-    grant: { product_scope: 'snowboard', colour: 'Serpent', return_required: true, delivery_by: '2026-10-30' },
-    proposal: { product: BURTON_ID, item: 44995, total: null, returns: 'Easy returns', delivery: 'Friday' },
+    grant: { product_scope: 'snowboard', colour: null, return_required: true, delivery_by: '2026-10-28' },
+    proposal: { product: BURTON_ID, item: 44995, total: null, returns: 'Easy returns per product page', delivery: 'Wed Oct 28' },
     action: {
-      detail: { product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Easy returns' } },
-      believed: { returns: 'Easy returns' },
+      detail: { product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-28', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Easy returns per product page' } },
+      believed: { returns: 'Easy returns per product page' },
     },
     terms: burtonTerms,
-    summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Easy returns' },
-    fulfillment: 'shipped_override',
-    recommendation: 'concede',
+    summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-28', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Easy returns per product page' },
+    fulfillment: 'held',
+    recommendation: null,
   })
-  const d1 = uid('12322:dispute')
-  plain('disputes', { id: d1, receipt_id: hero.rid, reason: 'Customer disputed the order', opened_at: at('17:30'), created_at: at('17:30') })
-  await chain('dispute_events', 'dispute_event', { id: uid('12322:ev1'), dispute_id: d1, event_type: 'opened', decided_by: null, basis: {}, created_at: at('17:30') })
 
-  // 3) Scenario B order 13422: agent complies, 0 problems, merchant represents and wins.
+  // 3) Scenario B order 13422: agent complies, 0 problems (Pass). A SEPARATE shipped order that the customer disputed;
+  //    the merchant represents and wins. This is the only dispute in the seed.
   const b = await build({
     key: '13422', order_ref: '13422', receipt_ref: 'AR-2026-0043', shopper: 'Ivan Dijkstra', agent: 'instinct-kk14680',
     at: { grant: '18:00', proposal: '18:04', action: '18:06', receipt: '18:07' },
     grant: { product_scope: null, colour: null, return_required: true, delivery_by: '2026-10-30' },
-    proposal: { product: ORCA_ID, item: 48983, total: 48983, returns: 'Free returns', delivery: 'Friday' },
+    proposal: { product: ORCA_ID, item: 48983, total: 48983, returns: 'Free returns', delivery: 'Thu Oct 29' },
     action: {
       detail: { product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Free returns' } },
       believed: { returns: 'Free returns' },
@@ -253,7 +254,7 @@ function emitSql(): string {
 -- It stops with an error, and writes nothing, if the ids below do not match this project,
 -- if the seed was already applied, or if the chain already has entries.
 --
--- Rows: orders 12322 (AR-2026-0042, hero, dispute received), 13422 (AR-2026-0043, Scenario B,
+-- Rows: orders 12322 (AR-2026-0042, hero, Review Required, NO dispute), 13422 (AR-2026-0043, Scenario B,
 -- merchant represents and wins), 14522 (gap, no receipt), and the tamper example receipt
 -- AR-2026-0041 ($449.95). Customers are demo names only. Payment: Demo Checkout — PayPal (simulated).
 -- Hashes: supabase/functions/_shared/hash.ts, chained from the origin hash. Seeded demo data:

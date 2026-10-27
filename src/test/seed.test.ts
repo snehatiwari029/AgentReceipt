@@ -36,10 +36,10 @@ describe('dashboard demo seed', () => {
     expect(readFileSync(join(__dirname, '..', '..', 'supabase', 'seed_dashboard_demo.sql'), 'utf8')).toBe(first.sql)
   })
 
-  it('writes a chain that verifies from the origin, with 17 chained entries in order', async () => {
+  it('writes a chain that verifies from the origin, with 16 chained entries in order', async () => {
     const { chain } = await chainOf()
-    expect(chain).toHaveLength(17)
-    expect(chain.map((c) => c.chain_seq)).toEqual(Array.from({ length: 17 }, (_, i) => i + 1))
+    expect(chain).toHaveLength(16)
+    expect(chain.map((c) => c.chain_seq)).toEqual(Array.from({ length: 16 }, (_, i) => i + 1))
     expect(chain[0].row.prev_hash).toBe(GENESIS_HASH)
     const check = await verifyChain(chain)
     expect(check.ok).toBe(true)
@@ -69,7 +69,7 @@ describe('dashboard demo seed', () => {
     const { records } = await chainOf()
     const receipts = records.filter((r) => r.table === 'receipts').map((r) => r.row)
     const hero = receipts.find((r) => r.receipt_ref === 'AR-2026-0042')!
-    expect(hero).toMatchObject({ order_ref: '12322', problems_found: 2, recommendation: 'concede' })
+    expect(hero).toMatchObject({ order_ref: '12322', problems_found: 2, recommendation: null, decision: 'review_required', fulfillment: 'held' })
     expect((hero.action_summary as { total_cents: number }).total_cents).toBe(50995)
     const mism = (hero.mismatch_results as { field: string; result: string }[]).filter((m) => m.result === 'mismatch').map((m) => m.field)
     expect(mism).toEqual(['Budget', 'Returns'])
@@ -94,15 +94,19 @@ describe('dashboard demo seed', () => {
     }
     const heroGrant = records.find((r) => r.table === 'grants' && r.row.shopper_ref === 'Jemaih Soresky')!.row
     const proposal = records.find((r) => r.table === 'proposals' && r.row.grant_id === heroGrant.id)!.row
-    expect(proposal).toMatchObject({ shown_item_price_cents: 44995, shown_total_cents: null, shown_returns_summary: 'Easy returns' })
+    expect(proposal).toMatchObject({ shown_item_price_cents: 44995, shown_total_cents: null, shown_returns_summary: 'Easy returns per product page' })
     expect(JSON.stringify(proposal)).not.toMatch(/final/i)
   })
 
-  it('seeded receipts carry the engine decision: hero HOLD (shipped under override), 13422 PASS, 0041 PASS', async () => {
+  it('seeded receipts carry the engine decision: hero Review Required (held, no dispute), 13422 PASS, 0041 PASS', async () => {
     const { records } = await chainOf()
     const rc = records.filter((r) => r.table === 'receipts').map((r) => r.row)
     const by = (ref: string) => rc.find((r) => r.receipt_ref === ref)!
-    expect(by('AR-2026-0042')).toMatchObject({ decision: 'hold', problems_found: 2, fulfillment: 'shipped_override' })
+    expect(by('AR-2026-0042')).toMatchObject({ decision: 'review_required', problems_found: 2, fulfillment: 'held', recommendation: null })
+    // the hero is NOT a dispute: the only dispute in the seed is the separate Orca order 13422
+    const disputes = records.filter((r) => r.table === 'disputes').map((r) => r.row)
+    expect(disputes).toHaveLength(1)
+    expect(disputes[0].receipt_id).toBe(by('AR-2026-0043').id)
     expect((by('AR-2026-0042').audit as { problem_fields: string[] }).problem_fields).toEqual(['Budget', 'Returns'])
     expect(by('AR-2026-0043')).toMatchObject({ decision: 'pass', problems_found: 0, fulfillment: 'proceed' })
     expect(by('AR-2026-0041')).toMatchObject({ decision: 'pass', problems_found: 0 })
@@ -140,7 +144,7 @@ describe('dashboard demo seed', () => {
     expect(sql).toMatch(/commit;\s*$/)
     expect(sql).toMatch(/Seed stopped/)
     expect(sql).not.toMatch(/\b(create|alter|drop)\s+(table|policy|function|index|trigger)\b/i)
-    expect(sql).toMatch(/setval\('chain_seq_gen', 17, true\)/)
+    expect(sql).toMatch(/setval\('chain_seq_gen', 16, true\)/)
     void TYPES
   })
 })

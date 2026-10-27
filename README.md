@@ -79,19 +79,54 @@ Any static host works, as long as every path serves `index.html` (single-page-ap
 
 - Deployment trigger
 
+## Principle
+
+**LLM where language is ambiguous, deterministic where money and trust are at stake.**
+
+Muse Spark reads and normalizes language. Code does the budget arithmetic, the exact matching, the SHA-256 hashing and the Pass / Review Required / Hold for Suspicion decision. Spark never does arithmetic, never generates or "fixes" a hash, never reads the chat in the auditor, and never decides a verdict on its own.
+
+## Decisions (three, everywhere)
+
+At order received, before fulfillment, the auditor returns exactly one of these as structured JSON. The merchant's order system holds shipment/capture; AgentReceipt only recommends.
+
+| Decision | When | Merchant | Meaning |
+|---|---|---|---|
+| **Pass** | 0 problems, hashes verify, all components present | Proceed, ship | Match |
+| **Review Required** | 1 or more field mismatches, hashes verify, all components present | Do not ship yet. Flagged "Merchant review needed" under Orders requiring attention | "I trust the record, I don't trust the match." |
+| **Hold for Suspicion** | A hash check fails, a required record is missing, the grant expired before the action, or the agent is unverified | Do not proceed. Investigate the record or agent first. Flagged under Orders requiring attention | "I don't trust the record itself yet." |
+
+Orders requiring attention = Review Required + Hold for Suspicion. **The hero order ($509.95, two problems) is Review Required and has no dispute**: review before fulfillment prevents the dispute. A dispute is a separate thing, shown only on a different, already-shipped order (the Orca order 13422). Represent / concede are post-dispute outcomes on that separate order, not decisions.
+
+AgentReceipt shows mismatch facts only; it does not decide liability and no network rule moves liability on any screen.
+
+## Auditor privacy boundary
+
+The auditor never receives the customer chat and never receives proposal free text. The shopper writes a structured proposal record next to the chat (fields only): the proposed product, item price, total shown (or null), `agent_summary_returns`, `agent_summary_delivery` and the `agent_believed_terms` it set. The auditor reads only those fields, the grant fields, the formal `terms_text` and the action record. The audit JSON echoes exactly those fields (`agent_summary`) and has no chat field and no proposal-text field. A test enforces this.
+
+## Meta model calls per hero flow
+
+Each call is a separate, isolated Muse Spark call with its own prompt, JSON-only output and a labelled fallback.
+
+| # | Call | Where | Input | Spark output (LLM) | Deterministic (code) | Status |
+|---|---|---|---|---|---|---|
+| 1 | Shopper tool-calling loop | `shopper-agent` | Customer chat (private, stays in the shopper) + store product summaries | Tool calls over several turns: set rules, search, get product, propose, place order. Reasoning shown on screen | Tool execution, totals, delivery dates, "arrives in time" check | Built |
+| 2 | Grant extraction | `shopper-agent` (`set_order_rules`) | Free-form request | Structured grant fields: budget, exact delivery date, returnable, size range, colour, product scope. Unmentioned = real null (the string "null" is also treated as null) | Validation, cents, date checks | Built |
+| 3 | Agent summary comparison | `auditor` | Structured fields only: `agent_summary_returns`, `agent_believed_terms`, formal `terms_text` | `returns_summary_matches_terms` true/false + reason ("no-hassle returns" vs "Final sale") | The Returns check and its cause use that answer; keyword fallback labelled `rules-fallback` | Built |
+| 4 | Language normalization | `auditor` (delivery phrase); shopper grant extraction (dates) | `agent_summary_delivery` phrase + today's date | An exact date, only when code cannot read the phrase itself | Date compare, budget math, exact matching | Built (delivery phrase); other fields planned |
+| 5 | Evidence pack narrative | planned | Auditor JSON only | 2-3 plain sentences + next action, no new amounts | Table shown alone, labelled fallback, if Spark fails | Planned |
+| 6 | Listing optimizer (AgentOptimize) | planned (Optimization page today is rules-based) | `marketing_blurb` vs formal `terms_text` + past mismatch counts | issue, evidence, suggested fix, expected dispute impact, priority. Merchant approves; never auto-edits | n/a | Planned |
+| 7 | Dispute reason classification | planned | Free-text reason on a separate disputed order | Budget / Returns / Delivery / Product / Other | Engine runs the mapped checks; Spark does not decide the outcome | Planned |
+
+Not done by Spark, ever: budget arithmetic ($449.95 + $60 = $509.95), SHA-256 hashes, the decision, reading the chat in the auditor.
+
 ## Hash spec
 
 One file defines hashing for every chained record: `supabase/functions/_shared/hash.ts`. The edge functions, the Tamper page, the seed script and the tests all import it.
 
 `entry_hash = sha256( prev_hash + "\n" + canonical JSON of the row )`, where the row leaves out `prev_hash`, `entry_hash`, `chain_seq` and `created_at`, object keys are sorted at every depth, and date-times are written in one fixed format. The first entry points at an all-zero origin hash. A grant's seal is its `entry_hash`.
 
-## Detection engine (PASS / HOLD / REVIEW)
+## Detection engine files
 
-At order received, before fulfillment, the AgentReceipt auditor checks the order against what the customer authorized. It returns a
-recommendation (structured JSON): PASS (proceed), HOLD (a check found a mismatch) or REVIEW (a record is missing or the tamper check failed).
-AgentReceipt recommends hold; your order system holds shipment/capture. AgentReceipt shows mismatch facts only; it does not decide liability
-and no network rule moves liability on any screen.
-
-- Rules: `supabase/functions/_shared/audit.ts` (no model, no hashing). Auditor function: `supabase/functions/auditor/`.
-- Inputs per order: grant fields, formal terms, action record, the agent's structured believed terms, hash checks. Never the chat.
-- Muse Spark reads one phrase (what the agent told the customer about returns). The rules decide the verdict.
+- Rules: `supabase/functions/_shared/audit.ts` (no model, no hashing). Input builder: `audit-input.ts`. Auditor function: `supabase/functions/auditor/` (Spark calls in `spark.ts`).
+- Checks in order: Product, Budget (item + shipping total), Delivery (including the arrival the agent told the customer), Colour, Size, Merchant, Payment, Returns, Grant validity.
+- An unspecified grant field is "not specified" and is never a problem. A missing record is Hold for Suspicion.

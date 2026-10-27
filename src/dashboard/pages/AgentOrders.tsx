@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import type { Dispute, DisputeEvent, Grant, Receipt } from '../../shared/schemas'
+import type { Decision, Dispute, DisputeEvent, Grant, Receipt } from '../../shared/schemas'
 import { formatMoney } from '../../shared/format'
 import { num, str, useRows, type Rows } from '../data'
 import { disputeStatus } from '../status'
 import { Card, Empty, Live, PageTitle } from '../components/Panel'
-import { RecommendationBadge } from '../components/Badges'
+import { DecisionBadge } from '../components/Badges'
 import VerdictTable from '../components/VerdictTable'
 
 type Session = {
@@ -25,7 +25,11 @@ type OrderRow = {
   status: string
   total_cents: number | null
   dispute: string | null
+  decision: Decision | null
 }
+
+// Orders requiring attention = Review Required + Hold for Suspicion. A dispute is not needed to be flagged.
+export const needsAttention = (o: { decision: Decision | null }) => o.decision === 'review_required' || o.decision === 'hold_suspicion'
 
 // A gap session has no receipt. Its order number is the "Order <ref>:" prefix of gap_note.
 // (The sessions table has no order column; a schema amendment can replace this later.)
@@ -53,6 +57,7 @@ export function buildOrders(
       status: str(r.action_summary.order_status) ?? '–',
       total_cents: num(r.action_summary.total_cents),
       dispute: d ? disputeStatus(events.filter((e) => e.dispute_id === d.id)) : null,
+      decision: r.decision,
     }
   })
   for (const s of sessions.filter((x) => x.detection_source === 'none')) {
@@ -67,6 +72,7 @@ export function buildOrders(
       // No receipt exists, so AgentReceipt recorded no amount for this order.
       total_cents: 0,
       dispute: null,
+      decision: 'hold_suspicion', // an unverified agent with no session or receipt: the record cannot be trusted
     })
   }
   return rows.sort((a, b) => {
@@ -75,6 +81,11 @@ export function buildOrders(
     if (b.order === null) return -1
     return Number(a.order) - Number(b.order)
   })
+}
+
+const suspicion = (r: Receipt): string[] => {
+  const v = (r.audit as { suspicion_reasons?: unknown } | null)?.suspicion_reasons
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 
 export default function AgentOrders() {
@@ -118,6 +129,10 @@ export default function AgentOrders() {
             </Empty>
           ) : (
             <Card label="Agent orders">
+              <p className="mb-3 text-sm font-semibold text-dash-ink" role="status">
+                Orders requiring attention: <span className="text-dash-attention">{rows.filter(needsAttention).length}</span>
+                <span className="ml-2 font-normal text-dash-label">Review Required + Hold for Suspicion. No dispute needed.</span>
+              </p>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
                   <thead>
@@ -129,7 +144,7 @@ export default function AgentOrders() {
                       <th className="py-2 pr-4 font-semibold">Status</th>
                       <th className="py-2 pr-4 font-semibold">Total</th>
                       <th className="py-2 pr-4 font-semibold">Problems</th>
-                      <th className="py-2 pr-4 font-semibold">Recommendation</th>
+                      <th className="py-2 pr-4 font-semibold">Decision</th>
                       <th className="py-2 font-semibold"></th>
                     </tr>
                   </thead>
@@ -151,7 +166,7 @@ export default function AgentOrders() {
                           <td className={`py-2 pr-4 font-bold ${r && r.problems_found > 0 ? 'text-dash-violation' : 'text-dash-ink'}`}>
                             {r ? r.problems_found : '–'}
                           </td>
-                          <td className="py-2 pr-4">{r ? <RecommendationBadge value={r.recommendation} /> : '–'}</td>
+                          <td className="py-2 pr-4">{o.decision ? <DecisionBadge value={o.decision} /> : '–'}</td>
                           <td className="py-2 text-right">
                             {r && (
                               <button
@@ -180,6 +195,18 @@ export default function AgentOrders() {
                       <p className="mb-3 text-sm font-semibold text-dash-ink">
                         {r.receipt_ref}: {r.problems_found} {r.problems_found === 1 ? 'problem' : 'problems'} found
                       </p>
+                      {r.decision && (
+                        <p className="mb-3 text-sm text-dash-ink">
+                          <DecisionBadge value={r.decision} />
+                          <span className="ml-2">{str((r.audit as Record<string, unknown> | null)?.merchant_action) ?? ''}</span>
+                          {str((r.audit as Record<string, unknown> | null)?.flag) && (
+                            <span className="ml-2 font-semibold text-dash-attention">{str((r.audit as Record<string, unknown>).flag)}</span>
+                          )}
+                        </p>
+                      )}
+                      {suspicion(r).length > 0 && (
+                        <p className="mb-3 text-sm text-dash-violation">Why the record is not trusted: {suspicion(r).join('; ')}.</p>
+                      )}
                       <VerdictTable rows={r.mismatch_results} />
                       {r.missing_components.length > 0 && (
                         <p className="mt-3 text-sm text-dash-attention">

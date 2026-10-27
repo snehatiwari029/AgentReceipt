@@ -1,7 +1,8 @@
 // Builds the auditor's input from stored records. The only place that decides which fields reach the auditor.
-// It reads grant FIELDS (never the chat: only a hash of it is stored), the action record, the merchant's formal
-// terms and hash-check results. Nothing from other orders, disputes or the tamper page.
-import type { ActionIn, AuditInput, GrantIn, HashIn, SemanticReturns, TermsIn } from './audit.ts'
+// It reads grant FIELDS (never the chat: only a hash of it is stored), the action record, the proposal record's
+// STRUCTURED fields (never free text), the merchant's formal terms and hash-check results.
+// Nothing from other orders, disputes or the tamper page.
+import type { ActionIn, AuditInput, GrantIn, HashIn, SemanticDelivery, SemanticReturns, TermsIn } from './audit.ts'
 
 type Row = Record<string, unknown>
 
@@ -17,6 +18,7 @@ export type OrderRecords = {
   merchant_name: string | null // the merchant the grant allows
   hash: HashIn | null
   semantic_returns?: SemanticReturns | null
+  semantic_delivery?: SemanticDelivery | null
 }
 
 export function auditInputFromRecords(r: OrderRecords): AuditInput {
@@ -29,6 +31,7 @@ export function auditInputFromRecords(r: OrderRecords): AuditInput {
   const grant: GrantIn | null = g
     ? {
       merchant_allowlist: r.merchant_name ? [r.merchant_name] : [],
+      agent_verified: g.agent_verified === true ? true : g.agent_verified === false ? false : null,
       product_scope: str(g.product_scope),
       amount_max_cents: int(g.amount_max_cents),
       budget_limit_cents: int(g.budget_limit_cents),
@@ -55,7 +58,8 @@ export function auditInputFromRecords(r: OrderRecords): AuditInput {
       delivery_date: str(detail.delivery_date),
       sealed_at: str(detail.sealed_at),
       payment_method_ref: str(detail.payment_method),
-      agent_summary_returns: str(summary.returns),
+      agent_summary_returns: str(r.proposal?.shown_returns_summary) ?? str(summary.returns),
+      agent_summary_delivery: str(r.proposal?.shown_delivery),
       agent_believed_returns: str(believed?.returns),
     }
     : null
@@ -74,5 +78,6 @@ export function auditInputFromRecords(r: OrderRecords): AuditInput {
     proposal_present: !!r.proposal,
     hash: r.hash,
     semantic_returns: r.semantic_returns ?? null,
+    semantic_delivery: r.semantic_delivery ?? null,
   }
 }

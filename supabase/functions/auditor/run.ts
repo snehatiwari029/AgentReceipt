@@ -1,11 +1,11 @@
 // The auditor, one order at a time. Pure TypeScript: the database, the model and the clock are injected so tests run it.
 //
 // PER-ORDER ISOLATION: each call reads ONLY the records of the one order it is asked about: its grant, its proposal,
-// its checkout action and the formal terms of the product in that action. From the rest of the chain it reads hashes
+// its checkout action and the formal terms of the product in that action. Proposal fields are read as STRUCTURED fields only. From the rest of the chain it reads hashes
 // and nothing else (to check the links). No chat, no shopper reasoning, no other order's grant, no disputes.
 //
 // AgentReceipt does not block checkout, payment or shipment. This returns a recommendation; the merchant's order
-// system holds shipment/capture. "AgentReceipt recommends hold; your order system holds shipment/capture."
+// system holds shipment/capture.
 import { audit, requiresAttention, type AuditResult, type HashIn } from './audit.ts'
 import { auditInputFromRecords } from './audit-input.ts'
 import { appendChained, type ChainDb } from './chain.ts'
@@ -27,7 +27,7 @@ export interface AuditorDb extends ChainDb {
   logStep(sessionId: string, step: 'receipt_issued', detail: Row): Promise<void>
 }
 
-export type AuditorDeps = { db: AuditorDb; reader: SemanticReader; now: () => Date; newId: () => string }
+export type AuditorDeps = { db: AuditorDb; reader: SemanticReader; now: () => Date; newId: () => string; today?: () => string }
 
 export type AuditorReply =
   | { type: 'audit'; receipt_ref: string | null; order_ref: string | null; audit: AuditResult; attention: boolean; issued: boolean }
@@ -79,20 +79,26 @@ export async function runAuditor(raw: unknown, deps: AuditorDeps): Promise<Audit
     ? { grant_ok: g.content, proposal_ok: p.content, action_ok: a.content, links_ok: links.includes(false) ? false : links.includes(null) ? null : true }
     : null
 
-  // Spark reads one phrase: what the agent's returns text claims. Only when the grant asks for returns and terms exist.
+  // Spark reads STRUCTURED fields only (never chat, never proposal free text): the agent's returns summary and believed
+  // terms against the formal terms, and the agent's delivery phrase as a date. Rules then do the matching.
+  const summaryReturns = (proposal?.shown_returns_summary ?? (detail.agent_summary as Row | undefined)?.returns ?? null) as string | null
   const believed = ((action?.agent_believed_terms as Row | null | undefined)?.returns ?? null) as string | null
-  const semantic = grant?.return_policy_required === true && product?.formal_terms_text && typeof believed === 'string' && believed
-    ? await deps.reader.readReturns(believed, product.formal_terms_text)
+  const claimText = typeof summaryReturns === 'string' && summaryReturns ? summaryReturns : believed
+  const semantic = grant?.return_policy_required === true && product?.formal_terms_text && typeof claimText === 'string' && claimText
+    ? await deps.reader.readReturns({ agent_summary_returns: claimText, agent_believed_terms: believed, formal_returns: product.formal_returns, formal_terms_text: product.formal_terms_text })
     : null
+  const deliveryPhrase = typeof proposal?.shown_delivery === 'string' ? (proposal.shown_delivery as string) : null
+  const todayDate = deps.today ? deps.today() : deps.now().toISOString().slice(0, 10)
+  const semantic_delivery = deliveryPhrase ? await deps.reader.readDelivery(deliveryPhrase, todayDate) : null
 
   const result = audit(auditInputFromRecords({
     session_opened: sessionOpened, grant, proposal, action,
     product: product ? { category: product.category, formal_returns: product.formal_returns, formal_terms_text: product.formal_terms_text, merchant_name: product.merchant_name } : null,
-    merchant_name: merchantName, hash, semantic_returns: semantic,
+    merchant_name: merchantName, hash, semantic_returns: semantic, semantic_delivery,
   }))
 
-  // A receipt needs a grant to hang on. Without one, return the (REVIEW / gap) result and write nothing.
-  if (!grant || !result.decision) return { type: 'audit', receipt_ref: null, order_ref: null, audit: result, attention: requiresAttention(result.decision), issued: false }
+  // A receipt needs a grant to hang on. Without one, return the Hold for Suspicion (gap) result and write nothing.
+  if (!grant) return { type: 'audit', receipt_ref: null, order_ref: null, audit: result, attention: requiresAttention(result.decision), issued: false }
 
   const refs = await db.refs()
   const receipt_ref = `AR-2026-${String(nextNumber(refs.map((r) => r.receipt_ref), /^AR-2026-(\d+)$/, 1)).padStart(4, '0')}`

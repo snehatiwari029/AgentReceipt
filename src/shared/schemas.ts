@@ -77,10 +77,12 @@ export type MismatchResult = {
 }
 
 // Post-dispute verdict. Null until a dispute exists.
-export type Recommendation = 'represent' | 'concede' | 'review'
+// Post-dispute outcome only, and only for a separate disputed order. Never the pre-fulfillment decision.
+export type Recommendation = 'represent' | 'concede'
 
 // Pre-fulfillment decision from the auditor (supabase/functions/_shared/audit.ts). Separate from the post-dispute verdict.
-export type Decision = 'pass' | 'hold' | 'review'
+export type Decision = 'pass' | 'review_required' | 'hold_suspicion'
+export const DECISION_LABEL: Record<Decision, string> = { pass: 'Pass', review_required: 'Review Required', hold_suspicion: 'Hold for Suspicion' }
 export type Fulfillment = 'proceed' | 'held' | 'shipped_override'
 
 export type Receipt = ChainFields & {

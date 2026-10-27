@@ -57,3 +57,5 @@ Any static host works, as long as every path serves `index.html` (single-page-ap
 - Vercel: `vercel.json` already has the rewrite.
 - Netlify / Cloudflare Pages: `public/_redirects` is copied into the build.
 - Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as build environment variables on the host.
+
+- Deployment trigger

@@ -6,6 +6,8 @@ import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { GENESIS_HASH, computeEntryHash, canonicalJson } from '../supabase/functions/_shared/hash'
+import { audit } from '../supabase/functions/_shared/audit'
+import { auditInputFromRecords } from '../supabase/functions/_shared/audit-input'
 
 // Ids of this Supabase project's existing rows (read once from the database). The seed SQL checks
 // them before inserting and stops with a clear error if they differ.
@@ -22,7 +24,7 @@ export const TABLES: Record<string, Cols> = {
   grants: [['id', 'uuid'], ['session_id', 'uuid'], ['version', 'int'], ['supersedes_grant_id', 'uuid'], ['shopper_ref', 'text'], ['agent_id', 'text'], ['agent_verified', 'bool'], ['merchant_id', 'uuid'], ['product_scope', 'text'], ['size_min_cm', 'int'], ['size_max_cm', 'int'], ['colour_preference', 'text'], ['currency', 'text'], ['amount_max_cents', 'int'], ['budget_limit_cents', 'int'], ['payment_method_ref', 'text'], ['shipping_method', 'text'], ['shipping_max_cost_cents', 'int'], ['delivery_by', 'date'], ['return_policy_required', 'bool'], ['confirmed_at', 'ts'], ['expires_at', 'ts'], ['private_chat_hash', 'text'], ['grant_json', 'json'], ['system_metadata', 'json'], ['schema_label', 'text'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
   proposals: [['id', 'uuid'], ['grant_id', 'uuid'], ['product_id', 'uuid'], ['shown_item_price_cents', 'int'], ['shown_total_cents', 'int'], ['shown_returns_summary', 'text'], ['shown_delivery', 'text'], ['shown_at', 'ts'], ['confirmation_ref', 'text'], ['confirmed_at', 'ts'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
   actions: [['id', 'uuid'], ['grant_id', 'uuid'], ['seq', 'int'], ['type', 'text'], ['detail', 'json'], ['agent_believed_terms', 'json'], ['image_evidence_ref', 'json'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
-  receipts: [['id', 'uuid'], ['receipt_ref', 'text'], ['order_ref', 'text'], ['grant_id', 'uuid'], ['proposal_id', 'uuid'], ['merchant_id', 'uuid'], ['terms_snapshot', 'json'], ['action_summary', 'json'], ['mismatch_results', 'json'], ['problems_found', 'int'], ['recommendation', 'text'], ['missing_components', 'texts'], ['image_evidence_ref', 'json'], ['schema_label', 'text'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
+  receipts: [['id', 'uuid'], ['receipt_ref', 'text'], ['order_ref', 'text'], ['grant_id', 'uuid'], ['proposal_id', 'uuid'], ['merchant_id', 'uuid'], ['terms_snapshot', 'json'], ['action_summary', 'json'], ['mismatch_results', 'json'], ['problems_found', 'int'], ['recommendation', 'text'], ['missing_components', 'texts'], ['image_evidence_ref', 'json'], ['schema_label', 'text'], ['sealed_at', 'ts'], ['decision', 'text'], ['audit', 'json'], ['fulfillment', 'text'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
   disputes: [['id', 'uuid'], ['receipt_id', 'uuid'], ['reason', 'text'], ['opened_at', 'ts'], ['created_at', 'ts']],
   dispute_events: [['id', 'uuid'], ['dispute_id', 'uuid'], ['event_type', 'text'], ['decided_by', 'text'], ['basis', 'json'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
 }
@@ -71,13 +73,10 @@ type Scenario = {
   action: Row & { detail: Row; believed: Row }
   terms: Row
   summary: Row
-  verdict: Row[]
+  fulfillment: 'proceed' | 'held' | 'shipped_override'
   recommendation: 'represent' | 'concede'
 }
 
-const mm = (field: string, grant: string | null, terms: string | null, actual: string | null, result: 'match' | 'mismatch' | 'unspecified', cause: string | null, next: string | null, cited: string[]): Row => ({
-  field, grant, merchant_terms: terms, actual, result, cause, next_action_who: next, cited_fields: cited,
-})
 
 async function build(s: Scenario) {
   const sid = uid(`${s.key}:session`)
@@ -95,7 +94,7 @@ async function build(s: Scenario) {
     shipping_method: null, shipping_max_cost_cents: null, delivery_by: s.grant.delivery_by,
     return_policy_required: s.grant.return_required, confirmed_at: confirmed, expires_at: expires,
   }
-  await chain('grants', 'grant', {
+  const grantRow = await chain('grants', 'grant', {
     id: gid, session_id: sid, version: 1, supersedes_grant_id: null, ...sealed,
     private_chat_hash: chatHash(s.key), grant_json: JSON.parse(canonicalJson({ ...sealed, payment_method_detail: 'PayPal', payment_simulated: true })),
     system_metadata: {
@@ -105,21 +104,28 @@ async function build(s: Scenario) {
     schema_label: LABEL, created_at: confirmed,
   })
   const pid = uid(`${s.key}:proposal`)
-  await chain('proposals', 'proposal', {
+  const proposalRow = await chain('proposals', 'proposal', {
     id: pid, grant_id: gid, product_id: s.proposal.product, shown_item_price_cents: s.proposal.item,
     shown_total_cents: s.proposal.total, shown_returns_summary: s.proposal.returns, shown_delivery: s.proposal.delivery,
     shown_at: at(s.at.proposal), confirmation_ref: `PC-${s.key}`, confirmed_at: at(s.at.proposal), created_at: at(s.at.proposal),
   })
-  await chain('actions', 'action', {
-    id: uid(`${s.key}:action`), grant_id: gid, seq: 1, type: 'checkout', detail: s.action.detail,
+  const actionRow = await chain('actions', 'action', {
+    id: uid(`${s.key}:action`), grant_id: gid, seq: 1, type: 'checkout', detail: { ...s.action.detail, sealed_at: at(s.at.action) },
     agent_believed_terms: s.action.believed, image_evidence_ref: null, created_at: at(s.at.action),
   })
   const rid = uid(`${s.key}:receipt`)
-  const problems = s.verdict.filter((v) => v.result === 'mismatch').length
+  // The verdict comes from the same engine the live auditor runs. Nothing here is hand-written.
+  const verdict = audit(auditInputFromRecords({
+    session_opened: true, grant: grantRow, proposal: proposalRow, action: actionRow,
+    product: { category: s.terms.category as string, formal_returns: s.terms.formal_returns as string, formal_terms_text: s.terms.formal_terms_text as string, merchant_name: s.terms.merchant as string },
+    merchant_name: 'Northwind Outfitters',
+    hash: { grant_ok: true, proposal_ok: true, action_ok: true, links_ok: true },
+  }))
   const receipt = await chain('receipts', 'receipt', {
     id: rid, receipt_ref: s.receipt_ref, order_ref: s.order_ref, grant_id: gid, proposal_id: pid, merchant_id: MERCHANT_ID,
-    terms_snapshot: s.terms, action_summary: s.summary, mismatch_results: s.verdict, problems_found: problems,
-    recommendation: s.recommendation, missing_components: [], image_evidence_ref: null, schema_label: LABEL, created_at: at(s.at.receipt),
+    terms_snapshot: s.terms, action_summary: s.summary, mismatch_results: verdict.checks, problems_found: verdict.problems,
+    recommendation: s.recommendation, missing_components: verdict.missing_components, image_evidence_ref: null, schema_label: LABEL,
+    sealed_at: at(s.at.receipt), decision: verdict.decision, audit: verdict, fulfillment: s.fulfillment, created_at: at(s.at.receipt),
   })
   return { gid, rid, receipt }
 }
@@ -130,12 +136,12 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
   lastHash = GENESIS_HASH
 
   const burtonTerms = {
-    merchant: 'Northwind Outfitters', product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton',
+    merchant: 'Northwind Outfitters', category: 'snowboard', product_id: BURTON_ID, product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton',
     size_cm: 156, colour: 'Serpent', price_cents: 44995, formal_returns: 'final_sale', formal_terms_text: 'Final Sale',
     terms_version: 'v1', standard_shipping_cents: 0, standard_delivery_days: 5, expedited_shipping_cents: 6000, expedited_delivery_days: 4,
   }
   const orcaTerms = {
-    merchant: 'Northwind Outfitters', product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech',
+    merchant: 'Northwind Outfitters', category: 'snowboard', product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech',
     size_cm: 156, colour: null, price_cents: 48983, formal_returns: 'free', formal_terms_text: 'Free returns within 30 days',
     terms_version: 'v1', standard_shipping_cents: 0, standard_delivery_days: 3, expedited_shipping_cents: null, expedited_delivery_days: null,
   }
@@ -152,16 +158,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     },
     terms: burtonTerms,
     summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'standard', shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-31', payment_method: 'Demo Checkout — PayPal' },
-    verdict: [
-      mm('Budget', '$500.00 max', 'Item $449.95, standard shipping free', '$449.95 total', 'match', null, null, ['amount_max_cents', 'budget_limit_cents']),
-      mm('Size', '150-165cm', '156cm', '156cm', 'match', null, null, ['size_min_cm', 'size_max_cm']),
-      mm('Colour', null, 'Serpent', 'Serpent', 'unspecified', null, null, ['colour_preference']),
-      mm('Returns', null, 'Final sale', 'Agent told customer "Final sale"', 'unspecified', null, null, ['return_policy_required']),
-      mm('Delivery', null, 'Standard 5 days', 'Sat 31 Oct 2026', 'unspecified', null, null, ['delivery_by']),
-      mm('Shipping method', null, 'Standard free, expedited $60.00', 'Standard', 'unspecified', null, null, ['shipping_method']),
-      mm('Merchant', 'Northwind Outfitters only', 'Northwind Outfitters', 'Northwind Outfitters', 'match', null, null, ['merchant_id']),
-      mm('Payment method', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'match', null, null, ['payment_method_ref']),
-    ],
+    fulfillment: 'proceed',
     recommendation: 'represent',
   })
 
@@ -177,16 +174,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     },
     terms: burtonTerms,
     summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Easy returns' },
-    verdict: [
-      mm('Budget', '$500.00 max', 'Item $449.95 + expedited $60.00', '$509.95 total', 'mismatch', 'Agent treated the cap as item-only', 'Merchant: concede the dispute', ['amount_max_cents', 'budget_limit_cents']),
-      mm('Returns', 'Returnable required', 'Final sale', 'Agent summary "Easy returns"', 'mismatch', 'Agent summary "Easy returns" misrepresented the formal final-sale terms', 'Merchant: concede the dispute', ['return_policy_required']),
-      mm('Size', '150-165cm', '156cm', '156cm', 'match', null, null, ['size_min_cm', 'size_max_cm']),
-      mm('Colour', 'Serpent', 'Serpent', 'Serpent', 'match', null, null, ['colour_preference']),
-      mm('Delivery', 'By Fri 30 Oct 2026', 'Expedited 4 days, standard 5 days', 'Fri 30 Oct 2026 (expedited)', 'match', null, null, ['delivery_by']),
-      mm('Shipping method', null, 'Standard free, expedited $60.00', 'Expedited', 'unspecified', null, null, ['shipping_method']),
-      mm('Merchant', 'Northwind Outfitters only', 'Northwind Outfitters', 'Northwind Outfitters', 'match', null, null, ['merchant_id']),
-      mm('Payment method', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'match', null, null, ['payment_method_ref']),
-    ],
+    fulfillment: 'shipped_override',
     recommendation: 'concede',
   })
   const d1 = uid('12322:dispute')
@@ -205,16 +193,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     },
     terms: orcaTerms,
     summary: { order_status: 'Confirmed', product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Free returns' },
-    verdict: [
-      mm('Budget', '$500.00 max', 'Item $489.83, standard shipping free', '$489.83 total', 'match', null, null, ['amount_max_cents', 'budget_limit_cents']),
-      mm('Returns', 'Returnable required', 'Free returns within 30 days', 'Agent summary "Free returns"', 'match', null, null, ['return_policy_required']),
-      mm('Size', '150-165cm', '156cm', '156cm', 'match', null, null, ['size_min_cm', 'size_max_cm']),
-      mm('Colour', null, null, null, 'unspecified', null, null, ['colour_preference']),
-      mm('Delivery', 'By Fri 30 Oct 2026', 'Standard 3 days', 'Thu 29 Oct 2026 (standard)', 'match', null, null, ['delivery_by']),
-      mm('Shipping method', null, 'Standard free', 'Standard, no expedited charge', 'unspecified', null, null, ['shipping_method']),
-      mm('Merchant', 'Northwind Outfitters only', 'Northwind Outfitters', 'Northwind Outfitters', 'match', null, null, ['merchant_id']),
-      mm('Payment method', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'Demo Checkout — PayPal', 'match', null, null, ['payment_method_ref']),
-    ],
+    fulfillment: 'proceed',
     recommendation: 'represent',
   })
   const d2 = uid('13422:dispute')

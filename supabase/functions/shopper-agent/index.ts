@@ -32,6 +32,18 @@ Deno.serve(async (req) => {
     const reply = await handle(body, {
       model, store: createStore(db), now: () => new Date(), demoDate: Deno.env.get('DEMO_DATE') ?? null,
       newId: () => crypto.randomUUID(),
+      // Tell the order system an order arrived (session id only). The reply is never read.
+      onOrderReceived: async (sessionId) => {
+        const ctl = new AbortController()
+        const timer = setTimeout(() => ctl.abort(), 20_000)
+        try {
+          await fetch(`${url}/functions/v1/auditor`, {
+            method: 'POST', signal: ctl.signal,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+          })
+        } finally { clearTimeout(timer) }
+      },
     })
     return json(reply, reply.type === 'error' ? 400 : 200)
   } catch (e) {

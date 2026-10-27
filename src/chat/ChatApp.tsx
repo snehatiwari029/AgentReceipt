@@ -107,7 +107,7 @@ export default function ChatApp() {
               onChange={(e) => setText(e.target.value)}
               maxLength={1000}
               disabled={busy || ordered}
-              placeholder={ordered ? 'Your order is placed' : 'Message Muse'}
+              placeholder={ordered ? 'Order received' : 'Message Muse'}
               className="min-w-0 flex-1 rounded-full border border-neutral-300 px-4 py-2 text-sm text-neutral-900 outline-none focus:border-indigo-500 disabled:bg-neutral-100"
             />
             <button type="submit" disabled={busy || ordered || !text.trim()} className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">

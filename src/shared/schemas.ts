@@ -67,13 +67,21 @@ export type MismatchResult = {
   grant: string | null
   merchant_terms: string | null
   actual: string | null
-  result: 'match' | 'mismatch' | 'unspecified'
+  result: 'match' | 'mismatch' | 'unspecified' | 'missing'
   cause: string | null
   next_action_who: string | null
   cited_fields: string[]
+  key?: string
+  next_action?: string | null
+  who?: 'Merchant' | null
 }
 
+// Post-dispute verdict. Null until a dispute exists.
 export type Recommendation = 'represent' | 'concede' | 'review'
+
+// Pre-fulfillment decision from the auditor (supabase/functions/_shared/audit.ts). Separate from the post-dispute verdict.
+export type Decision = 'pass' | 'hold' | 'review'
+export type Fulfillment = 'proceed' | 'held' | 'shipped_override'
 
 export type Receipt = ChainFields & {
   id: string
@@ -86,10 +94,14 @@ export type Receipt = ChainFields & {
   action_summary: Record<string, unknown>
   mismatch_results: MismatchResult[]
   problems_found: number
-  recommendation: Recommendation
+  recommendation: Recommendation | null
   missing_components: string[]
   image_evidence_ref: Record<string, unknown> | null
   schema_label: string
+  sealed_at: string | null
+  decision: Decision | null
+  audit: Record<string, unknown> | null
+  fulfillment: Fulfillment | null
 }
 
 export type Dispute = {

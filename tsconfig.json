@@ -30,9 +30,11 @@
     "src",
     "supabase/functions/_shared",
     "supabase/functions/shopper-agent",
+    "supabase/functions/auditor",
     "vite.config.ts"
   ],
   "exclude": [
-    "supabase/functions/shopper-agent/index.ts"
+    "supabase/functions/shopper-agent/index.ts",
+    "supabase/functions/auditor/index.ts"
   ]
 }

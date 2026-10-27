@@ -39,7 +39,7 @@ export function OrderCard({ order }: { order: OrderData }) {
   ]
   return (
     <section aria-label="Order confirmation" className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3.5">
-      <h2 className="text-sm font-bold text-emerald-900">Order placed</h2>
+      <h2 className="text-sm font-bold text-emerald-900">Order received</h2>
       <p className="mt-1 text-sm font-semibold text-neutral-900">{order.brand ? `${order.brand} ` : ''}{order.product_name}</p>
       <p className="text-xs text-neutral-600">{order.size_cm} cm{order.colour ? ` · ${order.colour}` : ''}</p>
       <dl className="mt-2 text-sm">
@@ -50,6 +50,7 @@ export function OrderCard({ order }: { order: OrderData }) {
       </dl>
       <p className="text-sm text-neutral-700">Arrives {order.delivery_label}</p>
       <p className="text-xs text-neutral-500">Paid with {order.payment_label}. Simulated, no real payment.</p>
+      <p className="text-xs text-neutral-500">Northwind confirms your order before it ships.</p>
     </section>
   )
 }

@@ -89,7 +89,9 @@ describe('Shopper agent function (the brain)', () => {
 
   it('never reads formal terms, auditor output, receipts, disputes or dashboard data', () => {
     for (const [name, text] of code()) {
-      expect(text, name).not.toMatch(/terms_text|formal_|verdict|auditor|mismatch|dispute|dashboard|tamper/i)
+      // index.ts holds the one "order received" signal to the order system (session id out, reply never read)
+      const pattern = name === 'index.ts' ? /terms_text|formal_|verdict|mismatch|dispute|dashboard|tamper/i : /terms_text|formal_|verdict|auditor|mismatch|dispute|dashboard|tamper/i
+      expect(text, name).not.toMatch(pattern)
       expect(text, name).not.toMatch(/from\(\s*['"](receipts|disputes|dispute_events)['"]/)
       expect(text, name).not.toMatch(/select\(\s*['"`]\*['"`]/)
     }
@@ -120,5 +122,41 @@ describe('Shopper agent function (the brain)', () => {
       expect(text, p).not.toMatch(/sb_secret_[A-Za-z0-9]|eyJ[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{20,}/)
       expect(text, p).not.toMatch(/MODEL_API_KEY\s*=\s*[^\s#]/)
     }
+  })
+})
+
+describe('Auditor function (separate from the shopper)', () => {
+  const AUD = join(SRC, '..', 'supabase', 'functions', 'auditor')
+  const SHARED = join(SRC, '..', 'supabase', 'functions', '_shared')
+  const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '')
+
+  it('never imports shopper code and never reads chat, reasoning, disputes or the tamper page', () => {
+    for (const f of readdirSync(AUD).filter((x) => x.endsWith('.ts'))) {
+      const text = strip(readFileSync(join(AUD, f), 'utf8'))
+      expect(text, f).not.toMatch(/shopper-agent|from\s+['"]\.\.\//)
+      expect(text, f).not.toMatch(/from\(\s*['"](disputes|dispute_events)['"]/)
+      expect(text, f).not.toMatch(/private_chat|messages\b.*chat|reasoning|select\(\s*['"`]\*['"`]\s*\)\s*\.\s*neq/i)
+    }
+  })
+
+  it('reads from the chain view hashes only, and the model key by name from the environment', () => {
+    const store = readFileSync(join(AUD, 'store.ts'), 'utf8')
+    expect([...store.matchAll(/from\('chain_entries'\)\.select\('([^']+)'\)/g)].map((m) => m[1])).toEqual(['entry_hash', 'entry_hash'])
+    const index = readFileSync(join(AUD, 'index.ts'), 'utf8')
+    expect(index).toContain("Deno.env.get('MODEL_API_KEY')")
+    expect(index).not.toMatch(/MODEL_API_KEY\s*=/)
+  })
+
+  it('keeps byte-identical copies of the shared engine, input builder and hash spec', () => {
+    for (const f of ['audit.ts', 'audit-input.ts', 'hash.ts']) {
+      expect(readFileSync(join(AUD, f), 'utf8'), f).toBe(readFileSync(join(SHARED, f), 'utf8'))
+    }
+    expect(readFileSync(join(AUD, 'chain.ts'), 'utf8')).toBe(readFileSync(join(SRC, '..', 'supabase', 'functions', 'shopper-agent', 'chain.ts'), 'utf8'))
+  })
+
+  it('the engine has no model, network or hashing in it, and no liability column or card-network wording', () => {
+    const engine = strip(readFileSync(join(SHARED, 'audit.ts'), 'utf8'))
+    expect(engine).not.toMatch(/fetch\(|crypto|sha256|sha-256|api\.meta\.ai/i)
+    expect(engine).not.toMatch(/liability column|mastercard|visa|••/i)
   })
 })

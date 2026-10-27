@@ -120,6 +120,8 @@ export type Deps = {
   now: () => Date
   demoDate?: string | null
   newId: () => string
+  // The order system's "order received" signal: gets the session id only, returns nothing the agent can read.
+  onOrderReceived?: (sessionId: string) => Promise<void>
 }
 
 // ---------- small helpers ----------
@@ -596,18 +598,19 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       const detail = {
         product_id: p.id, product_name: p.name, brand: p.brand, size_cm: p.size_cm, colour: p.colour,
         item_price_cents: p.price_cents, shipping_method: offer.shipping_method, shipping_cents: pd.shipping_cents,
-        total_cents: pd.total_cents, delivery_date: pd.delivery_date,
+        total_cents: pd.total_cents, delivery_date: pd.delivery_date, sealed_at: deps.now().toISOString(),
         payment_method: PAYMENT_REF, payment_method_detail: payDetail, payment_simulated: true,
         agent_summary: { returns: offer.summary },
       }
       const seq = await store.addAction(grantId, 'checkout', detail, { returns: offer.summary })
       await store.logStep(sessionId, 'order_received', { product_id: p.id, total_cents: pd.total_cents, action_seq: seq }, false)
+      try { await deps.onOrderReceived?.(sessionId) } catch { /* the order stands; the order system will show it needs attention */ }
       const order: OrderView = {
         product_name: p.name, brand: p.brand, size_cm: p.size_cm, colour: p.colour, item_price_cents: p.price_cents,
         shipping_label: offer.shipping_method === 'expedited' ? 'Expedited shipping' : 'Standard shipping',
         shipping_cents: pd.shipping_cents, total_cents: pd.total_cents, delivery_label: pd.delivery_label, payment_label: payLabel,
       }
-      return { result: { ok: true, placed: true }, done: { type: 'ordered', text: 'Your order is placed.', order, session_id: sessionId } }
+      return { result: { ok: true, placed: true }, done: { type: 'ordered', text: 'Order received.', order, session_id: sessionId } }
     }
     return { result: { error: `Unknown tool ${name}` } }
   })

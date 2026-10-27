@@ -250,6 +250,20 @@ describe('shopper-agent: the order reply is the confirmation', () => {
     expect(JSON.stringify(m.tables)).not.toContain('4111')
   })
 
+  it('tells the order system once with the session id only, and still places the order if that call fails', async () => {
+    for (const fail of [false, true]) {
+      const m = memoryStore()
+      const { r: first } = await firstTurn(m)
+      const sent: unknown[][] = []
+      const d = { ...deps(fakeModel([() => call('place_order', { product_id: BURTON, payment_method: 'PayPal', why: 'x' })]).model, m.store),
+        onOrderReceived: async (...args: unknown[]) => { sent.push(args); if (fail) throw new Error('order system down') } }
+      const r = await asOk(handle({ messages: [{ role: 'user', text: HERO }, { role: 'user', text: 'Order it. Use PayPal.' }], draft: first.draft, offers: first.offers }, d), 'ordered')
+      expect(sent).toEqual([[r.session_id]])
+      expect(r.text).toBe('Order received.')
+      expect(m.tables.session_events.at(-1)).toMatchObject({ step: 'order_received' })
+    }
+  })
+
   it('refuses an option the customer was never shown, and does not write', async () => {
     const m = memoryStore()
     const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: 'PayPal', why: 'x' }), () => ({ content: 'Let me show you options first.' })])

@@ -84,3 +84,14 @@ Any static host works, as long as every path serves `index.html` (single-page-ap
 One file defines hashing for every chained record: `supabase/functions/_shared/hash.ts`. The edge functions, the Tamper page, the seed script and the tests all import it.
 
 `entry_hash = sha256( prev_hash + "\n" + canonical JSON of the row )`, where the row leaves out `prev_hash`, `entry_hash`, `chain_seq` and `created_at`, object keys are sorted at every depth, and date-times are written in one fixed format. The first entry points at an all-zero origin hash. A grant's seal is its `entry_hash`.
+
+## Detection engine (PASS / HOLD / REVIEW)
+
+At order received, before fulfillment, the AgentReceipt auditor checks the order against what the customer authorized. It returns a
+recommendation (structured JSON): PASS (proceed), HOLD (a check found a mismatch) or REVIEW (a record is missing or the tamper check failed).
+AgentReceipt recommends hold; your order system holds shipment/capture. AgentReceipt shows mismatch facts only; it does not decide liability
+and no network rule moves liability on any screen.
+
+- Rules: `supabase/functions/_shared/audit.ts` (no model, no hashing). Auditor function: `supabase/functions/auditor/`.
+- Inputs per order: grant fields, formal terms, action record, the agent's structured believed terms, hash checks. Never the chat.
+- Muse Spark reads one phrase (what the agent told the customer about returns). The rules decide the verdict.

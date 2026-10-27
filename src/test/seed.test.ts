@@ -98,6 +98,25 @@ describe('dashboard demo seed', () => {
     expect(JSON.stringify(proposal)).not.toMatch(/final/i)
   })
 
+  it('seeded receipts carry the engine decision: hero HOLD (shipped under override), 13422 PASS, 0041 PASS', async () => {
+    const { records } = await chainOf()
+    const rc = records.filter((r) => r.table === 'receipts').map((r) => r.row)
+    const by = (ref: string) => rc.find((r) => r.receipt_ref === ref)!
+    expect(by('AR-2026-0042')).toMatchObject({ decision: 'hold', problems_found: 2, fulfillment: 'shipped_override' })
+    expect((by('AR-2026-0042').audit as { problem_fields: string[] }).problem_fields).toEqual(['Budget', 'Returns'])
+    expect(by('AR-2026-0043')).toMatchObject({ decision: 'pass', problems_found: 0, fulfillment: 'proceed' })
+    expect(by('AR-2026-0041')).toMatchObject({ decision: 'pass', problems_found: 0 })
+    for (const r of rc) {
+      expect(typeof r.sealed_at).toBe('string')
+      expect((r.audit as { footer: string }).footer).toContain('does not decide liability')
+    }
+    // the colour row for 13422 is "not specified, no check", and the action carries an exact sealed_at timestamp
+    const b = by('AR-2026-0043').mismatch_results as { field: string; result: string }[]
+    expect(b.find((m) => m.field === 'Colour')!.result).toBe('unspecified')
+    const actions = records.filter((r) => r.table === 'actions').map((r) => (r.row.detail as { sealed_at: string }).sealed_at)
+    for (const t of actions) expect(t).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  })
+
   it('stores grant fields only: unmentioned fields are null, no chat text, Demo Checkout, no card wording', async () => {
     const { records, sql } = await chainOf()
     const grants = records.filter((r) => r.table === 'grants').map((r) => r.row)

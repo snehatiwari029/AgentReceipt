@@ -1,7 +1,8 @@
 import type { MismatchResult, Recommendation } from '../../shared/schemas'
 
 // Colour is never the only signal: every badge has text.
-export function RecommendationBadge({ value }: { value: Recommendation }) {
+export function RecommendationBadge({ value }: { value: Recommendation | null }) {
+  if (!value) return <span className="text-xs font-semibold text-dash-label">No dispute yet</span>
   const map: Record<Recommendation, { text: string; cls: string }> = {
     represent: { text: 'Represent', cls: 'border-dash-teal text-dash-teal' },
     concede: { text: 'Concede', cls: 'border-dash-violation text-dash-violation' },
@@ -17,6 +18,9 @@ export function MatchBadge({ value }: { value: MismatchResult['result'] }) {
   }
   if (value === 'match') {
     return <span className="font-semibold text-dash-teal">✓ Match</span>
+  }
+  if (value === 'missing') {
+    return <span className="font-bold text-dash-attention">⚠ Record missing</span>
   }
   return <span className="font-semibold text-dash-label">– Not specified</span>
 }

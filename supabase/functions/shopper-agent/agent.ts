@@ -6,6 +6,10 @@ import type { ChatMessage, ModelClient, ToolDef } from './model.ts'
 export const AGENT_ID = 'meta-muse-j0376672'
 export const MERCHANT_NAME = 'Northwind Outfitters'
 export const PAYMENT_LABEL = 'Demo PayPal'
+// Demo only: whatever payment the customer names is accepted and shown as a simulated "Demo ..." payment.
+export function paymentLabel(said: string): string {
+  return /paypal/i.test(said) ? PAYMENT_LABEL : `Demo ${said}`
+}
 export const SCHEMA_LABEL = 'VI-aligned demo representation'
 export const MAX_MESSAGES = 40
 export const MAX_TEXT = 1000
@@ -40,7 +44,7 @@ export type Rules = {
   delivery_by: string | null
   return_policy_required: boolean | null
   product_scope: string | null
-  payment_method_ref: typeof PAYMENT_LABEL
+  payment_method_ref: string
 }
 
 export type Shipping = 'standard' | 'expedited'
@@ -374,7 +378,7 @@ function prompt(t: string, rules: Rules | null, offers: Offer[]): string {
     'Then call propose_products with one or two options. For each option choose the shipping method and write a short summary of the return situation from the product page text. The customer sees item price, your summary and the delivery day on each card.',
     "The 'message' of propose_products must be ONE friendly sentence that restates only what the customer told you (for example budget, arrival day, returns) and then introduces the options. Never mention anything they did not say. Never write 'null', 'not specified' or a list of fields.",
     'Do not ask about colour, size, delivery, returns or anything else the customer did not mention. Only if product selection is impossible without it.',
-    'The customer\'s reply that picks an option and says how they will pay IS their confirmation. Then call place_order with that product and the payment they named. If they pick an option but have not said how they will pay, ask only which payment to charge.',
+    'The customer\'s reply that picks an option and says how they will pay IS their confirmation (any payment method they name is fine, this is a demo). Then call place_order with that product and the payment they named. If they pick an option but have not said how they will pay, ask only which payment to charge.',
     shown,
     "Every tool call needs a short plain-words 'why' that the customer will see. Do not invent details the tools did not give you. Keep messages short.",
   ].join('\n')
@@ -464,7 +468,7 @@ async function openSession(deps: Deps, req: AgentRequest, rules: Rules) {
     product_scope: rules.product_scope, size_min_cm: rules.size_min_cm, size_max_cm: rules.size_max_cm,
     colour_preference: rules.colour_preference, currency: 'USD',
     amount_max_cents: rules.budget_max_cents, budget_limit_cents: rules.budget_max_cents,
-    payment_method_ref: PAYMENT_LABEL, shipping_method: null, shipping_max_cost_cents: null,
+    payment_method_ref: rules.payment_method_ref, shipping_method: null, shipping_max_cost_cents: null,
     delivery_by: rules.delivery_by, return_policy_required: rules.return_policy_required, confirmed_at, expires_at,
   }
   const grantId = deps.newId()
@@ -531,6 +535,18 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
         if (!summary) return { result: { error: 'Each offer needs a short summary.' } }
         const pd = priceAndDelivery(p, method, t)
         if (!pd) return { result: { error: `${p.name} has no expedited shipping.` } }
+        const by = ctx.rules.delivery_by
+        if (by && pd.delivery_date > by) {
+          const inTime = shippingOptions(p, t).filter((o) => o.arrives_date <= by)
+          return {
+            result: {
+              error: `${p.name} with ${method} shipping arrives ${dayLabel(pd.delivery_date)}, after the customer's date (${dayLabel(by)}). ` +
+                (inTime.length
+                  ? `Options that arrive in time: ${inTime.map((o) => `${o.method} (${o.cost}, arrives ${o.arrives})`).join('; ')}. Change the shipping method, pick a different product, or tell the customer plainly it cannot arrive in time.`
+                  : 'No shipping option for this product arrives in time. Pick a different product, or tell the customer plainly.'),
+            },
+          }
+        }
         offers.push({
           product_id: p.id, name: p.name, brand: p.brand, size_cm: p.size_cm, colour: p.colour, price_cents: p.price_cents,
           summary, delivery_label: pd.delivery_label, delivery_date: pd.delivery_date, shipping_method: method,
@@ -547,13 +563,14 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       const offer = req.offers.find((o) => o.product_id === pid)
       const p = byId.get(pid)
       if (!offer || !p) return { result: { error: 'The customer has not been shown that option yet. Propose it first.' } }
-      const pay = clean(args.payment_method, 60)
+      const pay = clean(args.payment_method, 40)
       if (!pay) return { result: { error: 'The customer has not said how they will pay. Ask only which payment to charge.' } }
-      if (!/paypal/i.test(pay)) return { result: { error: 'Only PayPal is accepted here. Tell the customer.' } }
+      if (/\d{4}/.test(pay)) return { result: { error: 'Do not take card or account numbers. Ask the customer to just name the payment method.' } }
+      const payLabel = paymentLabel(pay)
       const pd = priceAndDelivery(p, offer.shipping_method, t)
       if (!pd) return { result: { error: 'That shipping method is not available.' } }
 
-      const { sessionId, grantId } = await openSession(deps, req, ctx.rules ?? emptyRules())
+      const { sessionId, grantId } = await openSession(deps, req, { ...(ctx.rules ?? emptyRules()), payment_method_ref: payLabel })
       const confirmed_at = deps.now().toISOString()
       const proposalId = deps.newId()
       await store.addProposal({
@@ -564,7 +581,7 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       const detail = {
         product_id: p.id, product_name: p.name, brand: p.brand, size_cm: p.size_cm, colour: p.colour,
         item_price_cents: p.price_cents, shipping_method: offer.shipping_method, shipping_cents: pd.shipping_cents,
-        total_cents: pd.total_cents, delivery_date: pd.delivery_date, payment_method: PAYMENT_LABEL,
+        total_cents: pd.total_cents, delivery_date: pd.delivery_date, payment_method: payLabel,
         agent_summary: { returns: offer.summary },
       }
       const seq = await store.addAction(grantId, 'checkout', detail, { returns: offer.summary })
@@ -572,7 +589,7 @@ export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
       const order: OrderView = {
         product_name: p.name, brand: p.brand, size_cm: p.size_cm, colour: p.colour, item_price_cents: p.price_cents,
         shipping_label: offer.shipping_method === 'expedited' ? 'Expedited shipping' : 'Standard shipping',
-        shipping_cents: pd.shipping_cents, total_cents: pd.total_cents, delivery_label: pd.delivery_label, payment_label: PAYMENT_LABEL,
+        shipping_cents: pd.shipping_cents, total_cents: pd.total_cents, delivery_label: pd.delivery_label, payment_label: payLabel,
       }
       return { result: { ok: true, placed: true }, done: { type: 'ordered', text: 'Your order is placed.', order, session_id: sessionId } }
     }

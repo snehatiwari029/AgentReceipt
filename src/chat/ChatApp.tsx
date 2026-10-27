@@ -63,8 +63,13 @@ export default function ChatApp() {
       footer={
         <div className="space-y-2">
           {fresh && (
-            <button type="button" onClick={() => setText(DEMO_PROMPT)} className="w-full rounded-xl border border-neutral-300 px-3 py-1.5 text-left text-xs text-neutral-700">
-              Try the demo request
+            <button
+              type="button"
+              onClick={() => setText(DEMO_PROMPT)}
+              className="flex w-full items-center justify-between gap-2 rounded-xl border-2 border-indigo-500 bg-indigo-50 px-3 py-2 text-left text-sm font-semibold text-indigo-900"
+            >
+              <span>Try the demo test sequence</span>
+              <span className="shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Recommended</span>
             </button>
           )}
           <form onSubmit={(e) => { e.preventDefault(); void send(text) }} className="flex gap-2">

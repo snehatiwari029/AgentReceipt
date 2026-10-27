@@ -35,10 +35,18 @@ describe('/chat phone screen', () => {
     expect(frame).toContainElement(screen.getByLabelText('Message Muse'))
   })
 
+  it('says "Your personal assistant" under the Muse header', () => {
+    render(<ChatApp />)
+    expect(screen.getByText('Your personal assistant')).toBeInTheDocument()
+    expect(screen.queryByText(/personal shopper/)).toBeNull()
+  })
+
   it('fills the box with the demo request when the chip is tapped', async () => {
     const user = userEvent.setup()
     render(<ChatApp />)
-    await user.click(screen.getByRole('button', { name: 'Try the demo request' }))
+    const chip = screen.getByRole('button', { name: /Try the demo test sequence/ })
+    expect(chip).toHaveTextContent('Recommended')
+    await user.click(chip)
     expect((screen.getByLabelText('Message Muse') as HTMLInputElement).value).toMatch(/^Help me place an order for a snowboard/)
   })
 

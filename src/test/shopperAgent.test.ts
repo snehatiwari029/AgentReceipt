@@ -149,6 +149,34 @@ describe('shopper-agent: first reply', () => {
   })
 })
 
+describe('shopper-agent: never offers something that misses the customer\'s date', () => {
+  it('bounces a standard-shipping offer that arrives after Friday, naming the options that arrive in time', async () => {
+    const m = memoryStore()
+    const script = fakeModel([
+      () => call('set_order_rules', heroArgs),
+      () => call('propose_products', { message: 'x', payment_stated: false, why: 'x', offers: [{ product_id: BURTON, shipping_method: 'standard', summary: 'Easy returns' }] }),
+      () => call('propose_products', { message: 'Looking for a snowboard under $500 by Friday. Here is an option:', payment_stated: false, why: 'x', offers: [{ product_id: BURTON, shipping_method: 'expedited', summary: 'Easy returns' }] }),
+    ])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: HERO }] }, deps(script.model, m.store)), 'proposals')
+    expect(r.offers[0]).toMatchObject({ shipping_method: 'expedited', delivery_label: 'Fri Oct 30' })
+    const bounce = JSON.stringify(script.seen[2])
+    expect(bounce).toContain('arrives Sat Oct 31, after the customer')
+    expect(bounce).toContain('expedited ($60.00, arrives Fri Oct 30)')
+  })
+
+  it('lets the model decide: with no in-time option it must pick another product or tell the customer', async () => {
+    const m = memoryStore()
+    const script = fakeModel([
+      () => call('set_order_rules', { ...heroArgs, delivery_by: '2026-10-27' }),
+      () => call('propose_products', { message: 'x', payment_stated: false, why: 'x', offers: [{ product_id: ORCA, shipping_method: 'standard', summary: 'Free returns' }] }),
+      () => ({ content: "Sorry, nothing can arrive by Tuesday." }),
+    ])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: 'by Tuesday' }] }, deps(script.model, m.store)), 'message')
+    expect(r.text).toContain('nothing can arrive')
+    expect(JSON.stringify(script.seen[2])).toContain('No shipping option for this product arrives in time')
+  })
+})
+
 describe('shopper-agent: the order reply is the confirmation', () => {
   it('writes the session log, grant, proposal and action in order, on a valid chain', async () => {
     const m = memoryStore()
@@ -193,12 +221,21 @@ describe('shopper-agent: the order reply is the confirmation', () => {
     expect(Object.values(m.tables).every((t) => t.length === 0)).toBe(true)
   })
 
-  it('tells the customer when the payment is not PayPal, and writes nothing', async () => {
+  it('accepts whatever payment the customer names (demo only) and records it as a simulated payment', async () => {
     const m = memoryStore()
     const { r: first } = await firstTurn(m)
-    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: 'credit card', why: 'x' }), () => ({ content: 'Only PayPal works here.' })])
-    const r = await asOk(handle({ messages: [{ role: 'user', text: 'use my card' }], draft: first.draft, offers: first.offers }, deps(script.model, m.store)), 'message')
-    expect(r.text).toContain('PayPal')
+    const r = await asOk(orderTurn(m, first, { product_id: BURTON, payment_method: 'Apple Pay', why: 'x' }, 'Burton please, pay with Apple Pay'), 'ordered')
+    expect(r.order.payment_label).toBe('Demo Apple Pay')
+    expect(m.tables.grants[0].payment_method_ref).toBe('Demo Apple Pay')
+    expect(m.tables.actions.find((a) => a.type === 'checkout')!.detail).toMatchObject({ payment_method: 'Demo Apple Pay' })
+  })
+
+  it('does not take card numbers', async () => {
+    const m = memoryStore()
+    const { r: first } = await firstTurn(m)
+    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: 'card 4111 1111 1111 1111', why: 'x' }), () => ({ content: 'Just tell me the payment method, no numbers.' })])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: 'x' }], draft: first.draft, offers: first.offers }, deps(script.model, m.store)), 'message')
+    expect(r.text).toContain('no numbers')
     expect(m.tables.grants).toHaveLength(0)
   })
 

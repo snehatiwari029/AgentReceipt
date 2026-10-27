@@ -6,7 +6,6 @@ export type AgentRequestBody = {
   session_id?: string | null
   draft?: unknown
   offers?: unknown[]
-  confirm?: boolean
 }
 
 export async function askAgent(body: AgentRequestBody): Promise<AgentReply> {

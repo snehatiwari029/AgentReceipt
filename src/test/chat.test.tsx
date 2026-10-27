@@ -6,7 +6,6 @@ import ChatApp from '../chat/ChatApp'
 import EntryPage from '../app/EntryPage'
 
 const HERO = "Help me place an order for a snowboard for this weekend trip with my friends. Budget under $500."
-const view = [{ label: 'Store', value: 'Northwind Outfitters' }, { label: 'Budget', value: 'Under $500.00' }, { label: 'Colour', value: 'Not specified' }]
 const offers = [
   { product_id: 'p1', name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', price_cents: 44995, summary: 'Easy returns', delivery_label: 'Fri Oct 30', delivery_date: '2026-10-30', shipping_method: 'expedited', shown_at: '2026-10-26T18:00:00.000Z' },
   { product_id: 'p2', name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, price_cents: 48983, summary: 'Free returns', delivery_label: 'Thu Oct 29', delivery_date: '2026-10-29', shipping_method: 'standard', shown_at: '2026-10-26T18:00:00.000Z' },
@@ -36,50 +35,77 @@ describe('/chat phone screen', () => {
     expect(frame).toContainElement(screen.getByLabelText('Message Muse'))
   })
 
-  it('runs the whole hero conversation by calling only the shopper-agent function', async () => {
+  it('fills the box with the demo request when the chip is tapped', async () => {
     const user = userEvent.setup()
+    render(<ChatApp />)
+    await user.click(screen.getByRole('button', { name: 'Try the demo request' }))
+    expect((screen.getByLabelText('Message Muse') as HTMLInputElement).value).toMatch(/^Help me place an order for a snowboard/)
+  })
+
+  it('runs the hero conversation as chat: sentence, two cards, payment question, then the order', async () => {
+    const user = userEvent.setup()
+    const rules = { budget_max_cents: 50000, delivery_by: '2026-10-30' }
     replies = [
-      { type: 'confirm_rules', text: "Here's what I understood.", draft: { budget_max_cents: 50000 }, view, steps: ['Muse is checking: Reading your request'] },
-      { type: 'proposals', session_id: 's-1', text: 'Two good options.', offers, steps: ['Muse is checking: Looking at snowboards'] },
+      { type: 'proposals', text: 'Looking for snowboards under $500 that will arrive by Friday and that you can return. Here are two options from Northwind:', follow_up: 'Pick one, and tell me which payment to charge.', offers, draft: rules, steps: ['Muse is checking: Looking at snowboards'] },
       { type: 'ordered', session_id: 's-1', text: 'Your order is placed.', order: { product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_label: 'Expedited shipping', shipping_cents: 6000, total_cents: 50995, delivery_label: 'Fri Oct 30', payment_label: 'Demo PayPal' } },
     ]
     render(<ChatApp />)
     await user.type(screen.getByLabelText('Message Muse'), HERO)
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
-    // confirmation screen with "your order rules", status line, then Looks right
-    expect(await screen.findByLabelText('Your order rules')).toBeInTheDocument()
-    expect(screen.getByText('Muse is checking: Reading your request')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Looks right' }))
-
-    // proposal cards: price, summary, delivery day. No total.
+    // no form card anywhere; a sentence, two cards, then the payment question
     const burton = await screen.findByLabelText('Spellbinder Snowboard 2026/2027')
+    expect(screen.queryByLabelText('Your order rules')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Looks right|Change/ })).toBeNull()
+    expect(screen.getByText(/Looking for snowboards under \$500/)).toBeInTheDocument()
     expect(burton).toHaveTextContent('$449.95')
     expect(burton).toHaveTextContent('Easy returns')
     expect(burton).toHaveTextContent('Arrives Fri Oct 30')
     expect(burton).not.toHaveTextContent(/509|total|final/i)
+    const text = screen.getByTestId('phone-frame').textContent ?? ''
+    expect(text.indexOf('Here are two options')).toBeLessThan(text.indexOf('Spellbinder'))
+    expect(text.indexOf('Orca')).toBeLessThan(text.indexOf('Pick one, and tell me which payment to charge.'))
+    expect(text).not.toMatch(/null|not specified|Store|Looks right/i)
 
-    await user.click(burton.querySelector('button')!)
+    // the typed reply is the confirmation
+    await user.type(screen.getByLabelText('Message Muse'), 'Serpent looks cool. Order it. Use my PayPal account for checkout.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
     const order = await screen.findByLabelText('Order confirmation')
+    expect(order).toHaveTextContent('$449.95')
+    expect(order).toHaveTextContent('Expedited shipping')
+    expect(order).toHaveTextContent('$60')
     expect(order).toHaveTextContent('$509.95')
-    expect(order).toHaveTextContent('Demo PayPal')
+    expect(order).toHaveTextContent('Arrives Fri Oct 30')
+    expect(order).toHaveTextContent('Paid with Demo PayPal')
     expect(screen.getByLabelText('Message Muse')).toBeDisabled()
 
-    // every call went to the one function, with the publishable key only
-    expect(calls.map((c) => c.url)).toEqual(Array(3).fill('https://example.supabase.co/functions/v1/shopper-agent'))
+    // only the shopper-agent function, publishable key only, no confirm step
+    expect(calls.map((c) => c.url)).toEqual(Array(2).fill('https://example.supabase.co/functions/v1/shopper-agent'))
     expect(calls[0].headers.apikey).toBe('sb_publishable_test')
+    expect(calls[0].body.confirm).toBeUndefined()
     expect(calls[0].body.messages.at(-1)).toEqual({ role: 'user', text: HERO })
-    expect(calls[1].body).toMatchObject({ confirm: true, draft: { budget_max_cents: 50000 } })
-    // the order message carries the session and the full offers back, unchanged
-    expect(calls[2].body.session_id).toBe('s-1')
-    expect(calls[2].body.offers).toEqual(offers)
-    expect(calls[2].body.messages.at(-1).text).toMatch(/^Order it: the Burton Spellbinder/)
-    // status lines are display only: never sent back as chat
-    expect(JSON.stringify(calls[2].body.messages)).not.toContain('Muse is checking')
+    // the order message carries the rules and the full offers back, unchanged; status lines are never sent
+    expect(calls[1].body.draft).toEqual(rules)
+    expect(calls[1].body.offers).toEqual(offers)
+    expect(calls[1].body.messages.map((m: { role: string }) => m.role)).toEqual(['assistant', 'user', 'assistant', 'assistant', 'user'])
+    expect(JSON.stringify(calls[1].body.messages)).not.toContain('Muse is checking')
 
-    // nothing on the phone talks about the merchant side
     expect(screen.getByTestId('phone-frame').textContent).not.toMatch(/dashboard|grant|receipt|tamper|dispute|verdict/i)
     expect(screen.queryAllByRole('link')).toHaveLength(0)
+  })
+
+  it('sends a plain message when a card is picked', async () => {
+    const user = userEvent.setup()
+    replies = [
+      { type: 'proposals', text: 'Here are two options:', follow_up: 'Pick one, and tell me which payment to charge.', offers, draft: {} },
+      { type: 'message', text: 'Which payment should I charge?' },
+    ]
+    render(<ChatApp />)
+    await user.type(screen.getByLabelText('Message Muse'), 'a board under 500')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.click((await screen.findByLabelText('Spellbinder Snowboard 2026/2027')).querySelector('button')!)
+    expect(await screen.findByText('Which payment should I charge?')).toBeInTheDocument()
+    expect(calls[1].body.messages.at(-1).text).toBe("I'll take the Burton Spellbinder Snowboard 2026/2027.")
   })
 
   it('shows a plain message when Muse answers with an error', async () => {

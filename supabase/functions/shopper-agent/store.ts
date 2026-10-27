@@ -1,8 +1,7 @@
 // Supabase-backed Store. Runs in the edge function with the service role (auto-injected, never in the repo).
 // The product query lists its columns on purpose: the fine-print columns are not on the list, so the agent cannot see them.
 import { appendChained, type ChainDb } from './chain.ts'
-import { MERCHANT_NAME, type ProductRow, type Rules, type Step, type Store } from './agent.ts'
-import { PAYMENT_LABEL } from './agent.ts'
+import { MERCHANT_NAME, type ProductRow, type Step, type Store } from './agent.ts'
 
 export const PRODUCT_COLUMNS =
   'id,name,brand,category,size_cm,colour,price_cents,currency,marketing_blurb,standard_shipping_cents,standard_delivery_days,expedited_shipping_cents,expedited_delivery_days'
@@ -36,21 +35,6 @@ export function createStore(db: Db, newId: () => string = () => crypto.randomUUI
       const rows = must<{ id: string }[]>(r, 'read merchant')
       if (!rows?.[0]) throw new Error('Merchant not found')
       return rows[0].id
-    },
-    async getGrant(sessionId) {
-      const r = await db.from('grants')
-        .select('id,product_scope,size_min_cm,size_max_cm,colour_preference,amount_max_cents,delivery_by,return_policy_required')
-        .eq('session_id', sessionId).limit(1)
-      const g = must<Record<string, unknown>[]>(r, 'read grant')?.[0]
-      if (!g) return null
-      const rules: Rules = {
-        merchant: MERCHANT_NAME, budget_max_cents: (g.amount_max_cents as number | null) ?? null,
-        size_min_cm: (g.size_min_cm as number | null) ?? null, size_max_cm: (g.size_max_cm as number | null) ?? null,
-        colour_preference: (g.colour_preference as string | null) ?? null, delivery_by: (g.delivery_by as string | null) ?? null,
-        return_policy_required: (g.return_policy_required as boolean | null) ?? null,
-        product_scope: (g.product_scope as string | null) ?? null, payment_method_ref: PAYMENT_LABEL,
-      }
-      return { grantId: g.id as string, rules }
     },
     async hasStep(sessionId, step: Step) {
       const r = await db.from('session_events').select('id').eq('session_id', sessionId).eq('step', step).limit(1)

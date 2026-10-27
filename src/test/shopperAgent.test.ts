@@ -26,11 +26,6 @@ function memoryStore() {
   const store: Store = {
     listProducts: async () => PRODUCTS,
     merchantId: async () => MERCHANT,
-    getGrant: async (sid) => {
-      const g = tables.grants.find((x) => x.session_id === sid)
-      if (!g) return null
-      return { grantId: g.id as string, rules: { merchant: 'Northwind Outfitters', budget_max_cents: g.amount_max_cents as number, size_min_cm: g.size_min_cm as number, size_max_cm: g.size_max_cm as number, colour_preference: null, delivery_by: g.delivery_by as string, return_policy_required: g.return_policy_required as boolean, product_scope: g.product_scope as string, payment_method_ref: 'Demo PayPal' } }
-    },
     hasStep: async (sid, step: Step) => tables.session_events.some((e) => e.session_id === sid && e.step === step),
     createSession: async (row) => void tables.sessions.push(row),
     logStep: async (session_id, step, detail, simulated) => void tables.session_events.push({ session_id, step, detail, simulated }),
@@ -70,6 +65,10 @@ const deps = (model: ModelClient, store: Store): Deps => ({
 
 const HERO = 'Help me place an order for a snowboard for this weekend trip with my friends. It should look cool, size 150-165 cm, I need it by Friday. Budget under $500. I should be able to return it if it doesn\'t work for me.'
 const heroArgs = { budget_max_dollars: 500, size_min_cm: 150, size_max_cm: 165, colour_preference: null, delivery_by: '2026-10-30', return_policy_required: true, product_scope: 'snowboard', why: 'Reading your request' }
+const bothOffers = (payment_stated = false) => call('propose_products', {
+  message: "Looking for snowboards under $500 that arrive by Friday and that you can return. Here are two options from Northwind:", payment_stated, why: 'Showing you my picks',
+  offers: [{ product_id: BURTON, shipping_method: 'expedited', summary: 'Easy returns' }, { product_id: ORCA, shipping_method: 'standard', summary: 'Free returns' }],
+})
 
 async function asOk<T extends AgentReply['type']>(p: Promise<AgentReply>, type: T) {
   const r = await p
@@ -77,37 +76,67 @@ async function asOk<T extends AgentReply['type']>(p: Promise<AgentReply>, type: 
   return r as Extract<AgentReply, { type: T }> & AgentReply
 }
 
-describe('shopper-agent: intake', () => {
-  it('turns the plain-words request into confirmation fields and stores nothing yet', async () => {
-    const m = memoryStore()
-    const { model, seen } = fakeModel([() => call('capture_order_rules', heroArgs)])
-    const r = await asOk(handle({ messages: [{ role: 'user', text: HERO }] }, deps(model, m.store)), 'confirm_rules')
-    expect(r.draft).toMatchObject({ budget_max_cents: 50000, size_min_cm: 150, size_max_cm: 165, delivery_by: '2026-10-30', return_policy_required: true, payment_method_ref: 'Demo PayPal', merchant: 'Northwind Outfitters', colour_preference: null })
-    expect(r.view.find((v) => v.label === 'Colour')?.value).toBe('Not specified')
-    expect(r.view.find((v) => v.label === 'Needed by')?.value).toBe('Fri Oct 30')
-    expect(r.steps).toEqual(['Muse is checking: Reading your request'])
-    expect(m.tables.sessions).toHaveLength(0)
-    // the model was told today's date, and never shown product data at this stage
-    expect(JSON.stringify(seen[0])).toContain('2026-10-26 (today)')
-  })
+// Turn 1: the customer's request -> rules recorded in the conversation, options shown, nothing stored yet.
+async function firstTurn(m: ReturnType<typeof memoryStore>, payment_stated = false) {
+  const script = fakeModel([
+    () => call('set_order_rules', heroArgs, 'a'),
+    () => call('search_products', { category: 'snowboard', max_item_price_dollars: 500, why: 'Looking at snowboards under $500' }, 'b'),
+    () => bothOffers(payment_stated),
+  ])
+  const r = await asOk(handle({ messages: [{ role: 'user', text: HERO }] }, deps(script.model, m.store)), 'proposals')
+  return { r, script }
+}
 
-  it('asks a question instead when the model has nothing to record', async () => {
-    const m = memoryStore()
-    const { model } = fakeModel([() => ({ content: 'What are you shopping for?' })])
-    const r = await asOk(handle({ messages: [{ role: 'user', text: 'hi' }] }, deps(model, m.store)), 'message')
-    expect(r.text).toBe('What are you shopping for?')
-  })
+const orderTurn = (m: ReturnType<typeof memoryStore>, first: Extract<AgentReply, { type: 'proposals' }> & AgentReply, args: Record<string, unknown>, text = 'Serpent looks cool. Order it. Use my PayPal account for checkout.') =>
+  handle({ messages: [{ role: 'user', text: HERO }, { role: 'assistant', text: first.text }, { role: 'assistant', text: first.follow_up }, { role: 'user', text }], draft: first.draft, offers: first.offers },
+    deps(fakeModel([() => call('place_order', args)]).model, m.store))
 
-  it('rejects empty rules, bad dates and a false return flag (unmentioned is null, never false)', async () => {
+describe('shopper-agent: first reply', () => {
+  it('records the rules in the conversation, shows two cards and asks only for payment, and stores nothing yet', async () => {
     const m = memoryStore()
-    const { model } = fakeModel([
-      () => call('capture_order_rules', { budget_max_dollars: null, size_min_cm: null, size_max_cm: null, colour_preference: null, delivery_by: null, return_policy_required: null, product_scope: null, why: 'x' }),
-      () => call('capture_order_rules', { ...heroArgs, delivery_by: 'Friday', return_policy_required: false, size_min_cm: 165, size_max_cm: 150 }),
+    const { r, script } = await firstTurn(m)
+    expect(r.text).toBe('Looking for snowboards under $500 that arrive by Friday and that you can return. Here are two options from Northwind:')
+    expect(r.follow_up).toBe('Pick one, and tell me which payment to charge.')
+    expect(r.offers.map((o) => [o.name, o.price_cents, o.summary, o.delivery_label])).toEqual([
+      ['Spellbinder Snowboard 2026/2027', 44995, 'Easy returns', 'Fri Oct 30'],
+      ['T. Rice Orca Snowboard 2025/2026', 48983, 'Free returns', 'Thu Oct 29'],
     ])
-    const r = await asOk(handle({ messages: [{ role: 'user', text: 'a board' }] }, deps(model, m.store)), 'confirm_rules')
-    expect(r.draft.delivery_by).toBeNull()
-    expect(r.draft.return_policy_required).toBeNull()
-    expect([r.draft.size_min_cm, r.draft.size_max_cm]).toEqual([150, 165])
+    // offers carry no total
+    expect(JSON.stringify(r.offers)).not.toMatch(/total|50995|formal/i)
+    expect(r.draft).toMatchObject({ budget_max_cents: 50000, size_min_cm: 150, size_max_cm: 165, delivery_by: '2026-10-30', return_policy_required: true, colour_preference: null, payment_method_ref: 'Demo PayPal' })
+    expect(r.steps).toHaveLength(3)
+    // no form-style fields in the reply, and nothing written
+    expect(JSON.stringify({ text: r.text, follow_up: r.follow_up })).not.toMatch(/null|not specified/i)
+    expect(Object.values(m.tables).every((t) => t.length === 0)).toBe(true)
+    // the model saw today's date and only store summaries, never the store's fine print
+    const seen = JSON.stringify(script.seen.at(-1))
+    expect(JSON.stringify(script.seen[0])).toContain('2026-10-26 (today)')
+    expect(seen).toContain('Easy returns')
+    expect(seen).not.toMatch(/final.?sale|formal|terms_text|verdict|mismatch|receipt/i)
+  })
+
+  it('does not ask about payment again when the customer already named it', async () => {
+    const { r } = await firstTurn(memoryStore(), true)
+    expect(r.follow_up).toBe("Pick one and I'll place the order.")
+  })
+
+  it('stores unmentioned rules as null, and a false or bad value never becomes a rule', async () => {
+    const m = memoryStore()
+    const script = fakeModel([
+      () => call('set_order_rules', { ...heroArgs, delivery_by: 'Friday', return_policy_required: false, size_min_cm: 165, size_max_cm: 150 }),
+      () => bothOffers(),
+    ])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: 'a board' }] }, deps(script.model, m.store)), 'proposals')
+    expect(r.draft!.delivery_by).toBeNull()
+    expect(r.draft!.return_policy_required).toBeNull()
+    expect([r.draft!.size_min_cm, r.draft!.size_max_cm]).toEqual([150, 165])
+  })
+
+  it('refuses to propose before the rules are recorded', async () => {
+    const m = memoryStore()
+    const script = fakeModel([() => bothOffers(), () => ({ content: 'What are you shopping for?' })])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: 'hi' }] }, deps(script.model, m.store)), 'message')
+    expect(r.text).toContain('shopping for')
   })
 
   it('fails closed on bad requests and enforces the caps', async () => {
@@ -116,99 +145,76 @@ describe('shopper-agent: intake', () => {
     expect((await handle({ messages: [] }, deps(model, m.store))).type).toBe('error')
     expect((await handle({ messages: [{ role: 'user', text: 'x'.repeat(1001) }] }, deps(model, m.store))).type).toBe('error')
     expect((await handle({ messages: Array.from({ length: 41 }, () => ({ role: 'user', text: 'a' })) }, deps(model, m.store))).type).toBe('error')
-    expect((await handle({ messages: [{ role: 'user', text: 'a' }], confirm: true }, deps(model, m.store))).type).toBe('error')
     expect((await handle({ messages: [{ role: 'user', text: 'a' }], session_id: 'nope' }, deps(model, m.store))).type).toBe('error')
   })
 })
 
-describe('shopper-agent: full hero flow', () => {
-  it('confirm -> propose -> order writes the session log, grant, proposal and action in order, on a valid chain', async () => {
+describe('shopper-agent: the order reply is the confirmation', () => {
+  it('writes the session log, grant, proposal and action in order, on a valid chain', async () => {
     const m = memoryStore()
-    const d = (model: ModelClient) => deps(model, m.store)
-
-    // 1. intake
-    const r1 = await asOk(handle({ messages: [{ role: 'user', text: HERO }] }, d(fakeModel([() => call('capture_order_rules', heroArgs)]).model)), 'confirm_rules')
-
-    // 2. confirm: the agent browses, then proposes Burton (expedited) and Orca (standard)
-    const shopModel = fakeModel([
-      () => call('search_products', { category: 'snowboard', max_item_price_dollars: 500, why: 'Looking at snowboards under $500' }, 's1'),
-      () => call('get_product', { product_id: BURTON, why: 'Checking the Spellbinder' }, 's2'),
-      () => call('propose_products', {
-        message: 'Two good options.', why: 'Showing you my picks',
-        offers: [{ product_id: BURTON, shipping_method: 'expedited', summary: 'Easy returns' }, { product_id: ORCA, shipping_method: 'standard', summary: 'Free returns' }],
-      }),
-    ])
-    const history = [{ role: 'user', text: HERO }, { role: 'assistant', text: r1.text }]
-    const r2 = await asOk(handle({ messages: history, confirm: true, draft: r1.draft }, d(shopModel.model)), 'proposals')
-    expect(r2.session_id).toBeTruthy()
-    expect(r2.offers.map((o) => [o.name, o.price_cents, o.summary, o.delivery_label])).toEqual([
-      ['Spellbinder Snowboard 2026/2027', 44995, 'Easy returns', 'Fri Oct 30'],
-      ['T. Rice Orca Snowboard 2025/2026', 48983, 'Free returns', 'Thu Oct 29'],
-    ])
-    expect(r2.steps).toHaveLength(3)
-    // what the model saw from the tools: summaries, prices, shipping. Never formal terms.
-    const toolText = JSON.stringify(shopModel.seen.at(-1))
-    expect(toolText).toContain('Easy returns')
-    expect(toolText).not.toMatch(/final.?sale|formal|terms_text|verdict|mismatch|receipt/i)
-
-    // 3. customer orders
-    const orderModel = fakeModel([() => call('place_order', { product_id: BURTON, why: 'Placing your order' })])
-    const typed = 'Serpent looks cool. Order it. Use my PayPal account for checkout.'
-    const r3 = await asOk(handle({ messages: [...history, { role: 'assistant', text: r2.text }, { role: 'user', text: typed }], session_id: r2.session_id, offers: r2.offers }, d(orderModel.model)), 'ordered')
+    const { r: first } = await firstTurn(m)
+    const r3 = await asOk(orderTurn(m, first, { product_id: BURTON, payment_method: 'PayPal', why: 'Placing your order' }), 'ordered')
     expect(r3.order).toMatchObject({ product_name: 'Spellbinder Snowboard 2026/2027', colour: 'Serpent', size_cm: 156, item_price_cents: 44995, shipping_cents: 6000, total_cents: 50995, delivery_label: 'Fri Oct 30', payment_label: 'Demo PayPal' })
 
-    // session log, exact order, stops at "Order received"
     expect(m.tables.session_events.map((e) => e.step)).toEqual(['verified_agent_detected', 'session_started', 'intent_captured', 'intent_hash_recorded', 'grant_captured', 'order_received'])
     expect(m.tables.session_events[0]).toMatchObject({ simulated: true, detail: { agent_id: 'meta-muse-j0376672', agent_verified: true, label: 'simulated' } })
     expect(m.tables.sessions[0]).toMatchObject({ agent_id: 'meta-muse-j0376672', agent_verified: true, agent_verified_simulated: true })
 
-    // grant stored as fields, no chat text
     const grant = m.tables.grants[0]
     expect(grant).toMatchObject({ amount_max_cents: 50000, budget_limit_cents: 50000, size_min_cm: 150, size_max_cm: 165, delivery_by: '2026-10-30', return_policy_required: true, payment_method_ref: 'Demo PayPal', colour_preference: null, shipping_method: null })
-    expect(JSON.stringify(m.tables)).not.toContain('look cool')
     expect(JSON.stringify(m.tables)).not.toContain('weekend trip')
     expect(String(grant.private_chat_hash)).toMatch(/^sha256:[0-9a-f]{64}$/)
 
-    // proposal: total NOT stored as shown
     expect(m.tables.proposals[0]).toMatchObject({ shown_item_price_cents: 44995, shown_total_cents: null, shown_returns_summary: 'Easy returns', shown_delivery: 'Fri Oct 30' })
-    // actions: the view, then the checkout with the believed terms
     const checkout = m.tables.actions.find((a) => a.type === 'checkout')!
     expect(checkout).toMatchObject({ agent_believed_terms: { returns: 'Easy returns' }, detail: { item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-30', size_cm: 156, colour: 'Serpent' } })
 
-    // the whole chain verifies, and an edit to any stored record fails it
     const records: ChainRecord[] = m.chain.map((c) => ({ chain_seq: c.chain_seq, entry_type: c.table === 'grants' ? 'grant' : c.table === 'proposals' ? 'proposal' : 'action', row: c.row as ChainRecord['row'] }))
+    expect(records.map((r) => r.entry_type)).toEqual(['grant', 'proposal', 'action'])
     expect((await verifyChain(records)).ok).toBe(true)
     const edited = records.map((r, i) => (i === 0 ? { ...r, row: { ...r.row, amount_max_cents: 99900 } } : r))
     expect((await verifyChain(edited)).ok).toBe(false)
   })
 
-  it('refuses place_order for an option the customer was never shown, and does not write', async () => {
-    const m = memoryStore()
-    const r1 = await asOk(handle({ messages: [{ role: 'user', text: HERO }] }, deps(fakeModel([() => call('capture_order_rules', heroArgs)]).model, m.store)), 'confirm_rules')
-    const r2 = await asOk(handle({ messages: [{ role: 'user', text: HERO }], confirm: true, draft: r1.draft }, deps(fakeModel([() => ({ content: 'What colour?' })]).model, m.store)), 'message')
-    const { model } = fakeModel([() => call('place_order', { product_id: BURTON, why: 'x' }), () => ({ content: 'Let me show you options first.' })])
-    const r = await asOk(handle({ messages: [{ role: 'user', text: 'order it' }], session_id: r2.session_id, offers: [] }, deps(model, m.store)), 'message')
-    expect(r.text).toContain('options first')
-    expect(m.tables.proposals).toHaveLength(0)
-    expect(m.tables.session_events.some((e) => e.step === 'order_received')).toBe(false)
-  })
-
   it('does not enforce the budget itself (the receipt must be able to catch an overstep)', async () => {
     const m = memoryStore()
-    const r1 = await asOk(handle({ messages: [{ role: 'user', text: HERO }] }, deps(fakeModel([() => call('capture_order_rules', heroArgs)]).model, m.store)), 'confirm_rules')
-    const r2 = await asOk(handle({ messages: [{ role: 'user', text: HERO }], confirm: true, draft: r1.draft }, deps(fakeModel([() => call('propose_products', { message: 'x', why: 'x', offers: [{ product_id: BURTON, shipping_method: 'expedited', summary: 'Easy returns' }] })]).model, m.store)), 'proposals')
-    const r3 = await asOk(handle({ messages: [{ role: 'user', text: 'order it' }], session_id: r2.session_id, offers: r2.offers }, deps(fakeModel([() => call('place_order', { product_id: BURTON, why: 'x' })]).model, m.store)), 'ordered')
-    expect(r3.order.total_cents).toBe(50995)
-    expect(r3.order.total_cents).toBeGreaterThan(50000)
+    const { r: first } = await firstTurn(m)
+    const r = await asOk(orderTurn(m, first, { product_id: BURTON, payment_method: 'PayPal', why: 'x' }), 'ordered')
+    expect(r.order.total_cents).toBe(50995)
+    expect(r.order.total_cents).toBeGreaterThan(50000)
+  })
+
+  it('writes nothing and does not order when the customer has not said how they will pay', async () => {
+    const m = memoryStore()
+    const { r: first } = await firstTurn(m)
+    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: null, why: 'x' }), () => ({ content: 'Which payment should I charge?' })])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: HERO }, { role: 'user', text: "I'll take the Burton." }], draft: first.draft, offers: first.offers }, deps(script.model, m.store)), 'message')
+    expect(r.text).toContain('payment')
+    expect(Object.values(m.tables).every((t) => t.length === 0)).toBe(true)
+  })
+
+  it('tells the customer when the payment is not PayPal, and writes nothing', async () => {
+    const m = memoryStore()
+    const { r: first } = await firstTurn(m)
+    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: 'credit card', why: 'x' }), () => ({ content: 'Only PayPal works here.' })])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: 'use my card' }], draft: first.draft, offers: first.offers }, deps(script.model, m.store)), 'message')
+    expect(r.text).toContain('PayPal')
+    expect(m.tables.grants).toHaveLength(0)
+  })
+
+  it('refuses an option the customer was never shown, and does not write', async () => {
+    const m = memoryStore()
+    const script = fakeModel([() => call('place_order', { product_id: BURTON, payment_method: 'PayPal', why: 'x' }), () => ({ content: 'Let me show you options first.' })])
+    const r = await asOk(handle({ messages: [{ role: 'user', text: 'order the Burton with PayPal' }], offers: [] }, deps(script.model, m.store)), 'message')
+    expect(r.text).toContain('options first')
+    expect(Object.values(m.tables).every((t) => t.length === 0)).toBe(true)
   })
 
   it('will not place a second order in the same session', async () => {
     const m = memoryStore()
-    const r1 = await asOk(handle({ messages: [{ role: 'user', text: HERO }] }, deps(fakeModel([() => call('capture_order_rules', heroArgs)]).model, m.store)), 'confirm_rules')
-    const r2 = await asOk(handle({ messages: [{ role: 'user', text: HERO }], confirm: true, draft: r1.draft }, deps(fakeModel([() => call('propose_products', { message: 'x', why: 'x', offers: [{ product_id: ORCA, shipping_method: 'standard', summary: 'Free returns' }] })]).model, m.store)), 'proposals')
-    const order = () => handle({ messages: [{ role: 'user', text: 'order it' }], session_id: r2.session_id, offers: r2.offers }, deps(fakeModel([() => call('place_order', { product_id: ORCA, why: 'x' })]).model, m.store))
-    expect((await order()).type).toBe('ordered')
-    const again = await order()
+    const { r: first } = await firstTurn(m)
+    const done = await asOk(orderTurn(m, first, { product_id: ORCA, payment_method: 'PayPal', why: 'x' }), 'ordered')
+    const again = await handle({ messages: [{ role: 'user', text: 'order again' }], session_id: done.session_id, offers: first.offers }, deps(fakeModel([]).model, m.store))
     expect(again.type).toBe('message')
     expect(m.tables.proposals).toHaveLength(1)
   })

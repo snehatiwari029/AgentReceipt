@@ -1,5 +1,5 @@
 import { formatMoney } from '../shared/format'
-import type { OfferCardData, OrderData, RuleLine } from './types'
+import type { OfferCardData, OrderData } from './types'
 
 export function Bubble({ side, children }: { side: 'me' | 'muse'; children: string }) {
   const me = side === 'me'
@@ -16,37 +16,7 @@ export function StatusLine({ children }: { children: string }) {
   return <p className="px-1 text-xs italic text-neutral-500">{children}</p>
 }
 
-export function RulesCard({ view, state, onConfirm, onChange, disabled }: {
-  view: RuleLine[]; state: 'open' | 'confirmed' | 'changed'; onConfirm: () => void; onChange: () => void; disabled: boolean
-}) {
-  return (
-    <section aria-label="Your order rules" className="rounded-2xl border border-neutral-200 bg-white p-3.5 shadow-sm">
-      <h2 className="text-sm font-bold text-neutral-900">Your order rules</h2>
-      <dl className="mt-2 divide-y divide-neutral-100 text-sm">
-        {view.map((l) => (
-          <div key={l.label} className="flex justify-between gap-3 py-1.5">
-            <dt className="text-neutral-500">{l.label}</dt>
-            <dd className="text-right font-medium text-neutral-900">{l.value}</dd>
-          </div>
-        ))}
-      </dl>
-      {state === 'open' ? (
-        <div className="mt-3 flex gap-2">
-          <button type="button" disabled={disabled} onClick={onConfirm} className="flex-1 rounded-xl bg-indigo-600 py-2 text-sm font-semibold text-white disabled:opacity-50">
-            Looks right
-          </button>
-          <button type="button" disabled={disabled} onClick={onChange} className="rounded-xl border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-800 disabled:opacity-50">
-            Change
-          </button>
-        </div>
-      ) : (
-        <p className="mt-3 text-xs font-medium text-neutral-500">{state === 'confirmed' ? 'Confirmed. Muse will shop inside these rules.' : 'Changing these.'}</p>
-      )}
-    </section>
-  )
-}
-
-export function OfferCard({ offer, onOrder, disabled }: { offer: OfferCardData; onOrder: () => void; disabled: boolean }) {
+export function OfferCard({ offer, onPick, disabled }: { offer: OfferCardData; onPick: () => void; disabled: boolean }) {
   return (
     <section aria-label={offer.name} className="rounded-2xl border border-neutral-200 bg-white p-3.5 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{offer.brand}</p>
@@ -55,8 +25,8 @@ export function OfferCard({ offer, onOrder, disabled }: { offer: OfferCardData; 
       <p className="mt-2 text-lg font-extrabold text-neutral-900">{formatMoney(offer.price_cents)}</p>
       <p className="text-sm text-neutral-800">{offer.summary}</p>
       <p className="text-sm text-neutral-600">Arrives {offer.delivery_label}</p>
-      <button type="button" disabled={disabled} onClick={onOrder} className="mt-3 w-full rounded-xl bg-indigo-600 py-2 text-sm font-semibold text-white disabled:opacity-50">
-        Order it
+      <button type="button" disabled={disabled} onClick={onPick} className="mt-3 w-full rounded-xl bg-indigo-600 py-2 text-sm font-semibold text-white disabled:opacity-50">
+        Pick this one
       </button>
     </section>
   )

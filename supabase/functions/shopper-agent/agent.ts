@@ -72,10 +72,9 @@ export type OrderView = {
   payment_label: string
 }
 
-export type AgentReply = { session_id?: string; steps?: string[] } & (
+export type AgentReply = { session_id?: string; steps?: string[]; draft?: Rules } & (
   | { type: 'message'; text: string }
-  | { type: 'confirm_rules'; text: string; draft: Rules; view: { label: string; value: string }[] }
-  | { type: 'proposals'; text: string; offers: Offer[] }
+  | { type: 'proposals'; text: string; offers: Offer[]; follow_up: string }
   | { type: 'ordered'; text: string; order: OrderView }
   | { type: 'error'; message: string }
 )
@@ -85,7 +84,6 @@ export type AgentRequest = {
   session_id: string | null
   draft: Rules | null
   offers: Offer[]
-  confirm: boolean
 }
 
 export type Step =
@@ -95,7 +93,6 @@ export type Step =
 export interface Store {
   listProducts(): Promise<ProductRow[]>
   merchantId(): Promise<string>
-  getGrant(sessionId: string): Promise<{ grantId: string; rules: Rules } | null>
   hasStep(sessionId: string, step: Step): Promise<boolean>
   createSession(row: Record<string, unknown>): Promise<void>
   logStep(sessionId: string, step: Step, detail: Record<string, unknown>, simulated: boolean): Promise<void>
@@ -199,7 +196,7 @@ export function rulesFromModel(args: Record<string, unknown>, todayDate: string)
   })
 }
 
-// From a draft sent back by the phone screen: re-checked the same way, in cents.
+// From the rules the phone screen echoes back with each message: re-checked the same way, in cents.
 export function rulesFromDraft(raw: unknown): Rules | null {
   if (!raw || typeof raw !== 'object') return null
   const d = raw as Record<string, unknown>
@@ -213,26 +210,7 @@ export function rulesFromDraft(raw: unknown): Rules | null {
     return_policy_required: d.return_policy_required === true ? true : null,
     product_scope: clean(d.product_scope, 60),
   })
-  return hasAnyRule(rules) ? rules : null
-}
-
-export function hasAnyRule(r: Rules): boolean {
-  return [r.budget_max_cents, r.size_min_cm, r.size_max_cm, r.colour_preference, r.delivery_by, r.return_policy_required, r.product_scope]
-    .some((v) => v !== null)
-}
-
-export function rulesView(r: Rules): { label: string; value: string }[] {
-  const size = r.size_min_cm && r.size_max_cm ? `${r.size_min_cm}–${r.size_max_cm} cm` : r.size_min_cm ? `${r.size_min_cm} cm or longer` : r.size_max_cm ? `${r.size_max_cm} cm or shorter` : 'Not specified'
-  return [
-    { label: 'Store', value: r.merchant },
-    { label: 'Looking for', value: r.product_scope ?? 'Not specified' },
-    { label: 'Budget', value: r.budget_max_cents ? `Under ${usd(r.budget_max_cents)}` : 'Not specified' },
-    { label: 'Size', value: size },
-    { label: 'Colour', value: r.colour_preference ?? 'Not specified' },
-    { label: 'Needed by', value: r.delivery_by ? dayLabel(r.delivery_by) : 'Not specified' },
-    { label: 'Returns', value: r.return_policy_required ? 'Must be returnable' : 'Not specified' },
-    { label: 'Payment', value: r.payment_method_ref },
-  ]
+  return rules
 }
 
 // ---------- request checking ----------
@@ -275,36 +253,34 @@ export function parseRequest(raw: unknown): AgentRequest | string {
     session_id: typeof sid === 'string' ? sid : null,
     draft: rulesFromDraft(b.draft),
     offers,
-    confirm: b.confirm === true,
   }
 }
 
 // ---------- tools ----------
 const why = { type: 'string', description: 'Plain words, under 12 words, shown to the customer: what you are doing and why.' }
 
-const CAPTURE_TOOL: ToolDef = {
-  type: 'function',
-  function: {
-    name: 'capture_order_rules',
-    description: "Record the rules the customer stated for this purchase. Use null for anything the customer did not mention. Never guess.",
-    parameters: {
-      type: 'object',
-      properties: {
-        budget_max_dollars: { type: ['number', 'null'], description: 'Budget the customer stated, in dollars.' },
-        size_min_cm: { type: ['integer', 'null'] },
-        size_max_cm: { type: ['integer', 'null'] },
-        colour_preference: { type: ['string', 'null'] },
-        delivery_by: { type: ['string', 'null'], description: 'Exact date YYYY-MM-DD the customer needs it by.' },
-        return_policy_required: { type: ['boolean', 'null'], description: 'true only if the customer said it must be returnable; otherwise null.' },
-        product_scope: { type: ['string', 'null'], description: 'What they want, e.g. "snowboard".' },
-        why,
+const TOOLS: ToolDef[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'set_order_rules',
+      description: "Record the rules the customer has stated for this purchase. Use null for anything the customer did not mention. Never guess. Call it when the customer states or changes rules.",
+      parameters: {
+        type: 'object',
+        properties: {
+          budget_max_dollars: { type: ['number', 'null'], description: 'Budget the customer stated, in dollars.' },
+          size_min_cm: { type: ['integer', 'null'] },
+          size_max_cm: { type: ['integer', 'null'] },
+          colour_preference: { type: ['string', 'null'] },
+          delivery_by: { type: ['string', 'null'], description: 'Exact date YYYY-MM-DD the customer needs it by.' },
+          return_policy_required: { type: ['boolean', 'null'], description: 'true only if the customer said it must be returnable; otherwise null.' },
+          product_scope: { type: ['string', 'null'], description: 'What they want, e.g. "snowboard".' },
+          why,
+        },
+        required: ['budget_max_dollars', 'size_min_cm', 'size_max_cm', 'colour_preference', 'delivery_by', 'return_policy_required', 'product_scope', 'why'],
       },
-      required: ['budget_max_dollars', 'size_min_cm', 'size_max_cm', 'colour_preference', 'delivery_by', 'return_policy_required', 'product_scope', 'why'],
     },
   },
-}
-
-const SHOP_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
@@ -339,7 +315,8 @@ const SHOP_TOOLS: ToolDef[] = [
       parameters: {
         type: 'object',
         properties: {
-          message: { type: 'string', description: 'One or two friendly sentences to the customer.' },
+          message: { type: 'string', description: 'ONE friendly sentence restating only what the customer actually told you, ending by introducing the options, e.g. "... Here are two options from Northwind:".' },
+          payment_stated: { type: 'boolean', description: 'true only if the customer has already said how they will pay (for example PayPal) in this chat.' },
           offers: {
             type: 'array', minItems: 1, maxItems: 2,
             items: {
@@ -354,7 +331,7 @@ const SHOP_TOOLS: ToolDef[] = [
           },
           why,
         },
-        required: ['message', 'offers', 'why'],
+        required: ['message', 'payment_stated', 'offers', 'why'],
       },
     },
   },
@@ -362,40 +339,42 @@ const SHOP_TOOLS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'place_order',
-      description: 'Place the order for an option the customer has seen and clearly told you to order.',
-      parameters: { type: 'object', properties: { product_id: { type: 'string' }, why }, required: ['product_id', 'why'] },
+      description: "Place the order. Call it when the customer's reply picks an option you showed AND names how they will pay. That reply is their confirmation.",
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: { type: 'string' },
+          payment_method: { type: ['string', 'null'], description: 'What the customer said they will pay with, e.g. "PayPal". null if they have not said.' },
+          why,
+        },
+        required: ['product_id', 'payment_method', 'why'],
+      },
     },
   },
 ]
 
-// ---------- prompts ----------
-function intakePrompt(t: string): string {
-  return [
-    'You are Muse, a friendly personal shopping assistant for a customer shopping at Northwind Outfitters (snowboards and skis).',
-    `Today is ${t}. Upcoming days: ${calendar(t)}.`,
-    "Read the customer's message and call capture_order_rules with the rules they stated.",
-    'Record only what the customer actually said. Anything not mentioned is null. Never use false for something they did not mention.',
-    'Turn a day like "Friday" into the exact date from the upcoming days above.',
-    'If the message says nothing about what to buy or any limits, ask one short question instead of calling the tool.',
-    'Keep replies short.',
-  ].join('\n')
-}
-
-function shopPrompt(t: string, rules: Rules, offers: Offer[]): string {
+// ---------- prompt ----------
+function prompt(t: string, rules: Rules | null, offers: Offer[]): string {
   const shown = offers.length
     ? `Options already shown to the customer:\n${offers.map((o) => `- ${o.name} (product_id ${o.product_id}), you described its returns as "${o.summary}", delivery ${o.delivery_label}`).join('\n')}`
     : 'You have not shown the customer any options yet.'
-  return [
-    'You are Muse, a personal shopping agent for a customer at Northwind Outfitters.',
-    `Today is ${t}. Upcoming days: ${calendar(t)}.`,
-    `The customer confirmed these order rules. Act only inside them. They cannot be widened: ${JSON.stringify({
+  const known = rules
+    ? JSON.stringify({
       budget_max_dollars: rules.budget_max_cents ? rules.budget_max_cents / 100 : null,
       size_min_cm: rules.size_min_cm, size_max_cm: rules.size_max_cm, colour_preference: rules.colour_preference,
       delivery_by: rules.delivery_by, return_policy_required: rules.return_policy_required, product_scope: rules.product_scope,
-    })}`,
+    })
+    : 'none recorded yet'
+  return [
+    'You are Muse, a friendly personal shopping agent for a customer at Northwind Outfitters (snowboards and skis).',
+    `Today is ${t}. Upcoming days: ${calendar(t)}.`,
+    `Rules the customer has told you so far: ${known}. Act only inside them. They cannot be widened.`,
+    "When the customer states what they want, first call set_order_rules with only what they actually said. Anything not mentioned is null. Never use false for something they did not mention. Turn a day like \"Friday\" into the exact date from the upcoming days.",
     "Use the tools to look at the store's products. You only see the store's product summaries, prices and shipping options.",
-    'When you have good matches, call propose_products with one or two options. For each option choose the shipping method and write a short summary of the return situation from the product page text. The customer sees item price, your summary and the delivery day on each card, then decides.',
-    'Only call place_order after the customer clearly tells you to order a specific option you showed.',
+    'Then call propose_products with one or two options. For each option choose the shipping method and write a short summary of the return situation from the product page text. The customer sees item price, your summary and the delivery day on each card.',
+    "The 'message' of propose_products must be ONE friendly sentence that restates only what the customer told you (for example budget, arrival day, returns) and then introduces the options. Never mention anything they did not say. Never write 'null', 'not specified' or a list of fields.",
+    'Do not ask about colour, size, delivery, returns or anything else the customer did not mention. Only if product selection is impossible without it.',
+    'The customer\'s reply that picks an option and says how they will pay IS their confirmation. Then call place_order with that product and the payment they named. If they pick an option but have not said how they will pay, ask only which payment to charge.',
     shown,
     "Every tool call needs a short plain-words 'why' that the customer will see. Do not invent details the tools did not give you. Keep messages short.",
   ].join('\n')
@@ -461,22 +440,8 @@ async function runLoop(
   return { type: 'message', text: "I'm taking longer than expected on this. Please try again.", steps }
 }
 
-// ---------- stage 1: understand the request ----------
-async function intake(deps: Deps, req: AgentRequest): Promise<AgentReply> {
-  const t = today(deps)
-  return runLoop(deps, intakePrompt(t), req.messages, [CAPTURE_TOOL], async (name, args) => {
-    if (name !== 'capture_order_rules') return { result: { error: `Unknown tool ${name}` } }
-    const rules = rulesFromModel(args, t)
-    if (!hasAnyRule(rules)) return { result: { error: 'The customer has not stated any rules yet. Ask them a short question.' } }
-    return {
-      result: { ok: true },
-      done: { type: 'confirm_rules', text: "Here's what I understood. Please check it. I'll only shop inside these rules.", draft: rules, view: rulesView(rules) },
-    }
-  })
-}
-
-// ---------- stage 2: customer confirmed the rules ----------
-async function confirmRules(deps: Deps, req: AgentRequest, rules: Rules): Promise<AgentReply> {
+// ---------- one conversation turn ----------
+async function openSession(deps: Deps, req: AgentRequest, rules: Rules) {
   const { store } = deps
   const sessionId = deps.newId()
   const merchant = await store.merchantId()
@@ -503,32 +468,43 @@ async function confirmRules(deps: Deps, req: AgentRequest, rules: Rules): Promis
     delivery_by: rules.delivery_by, return_policy_required: rules.return_policy_required, confirmed_at, expires_at,
   }
   const grantId = deps.newId()
-  const grant_json = JSON.parse(canonicalJson(sealed))
   await store.addGrant({
     id: grantId, session_id: sessionId, version: 1, supersedes_grant_id: null, ...sealed,
-    private_chat_hash, grant_json,
+    private_chat_hash, grant_json: JSON.parse(canonicalJson(sealed)),
     system_metadata: { data_sharing_limits: 'grant fields only, this purchase only', checked: false, priority: 'P1' },
     schema_label: SCHEMA_LABEL,
   })
   const grant_seal = `sha256:${await sha256Hex(canonicalJson(sealed))}`
   await store.logStep(sessionId, 'grant_captured', { grant_id: grantId, grant_seal, confirmed_at, expires_at, schema_label: SCHEMA_LABEL }, false)
-
-  const reply = await shop(deps, req, grantId, sessionId, rules, 'The customer has confirmed the order rules. Please look at the products and propose options.')
-  return { ...reply, session_id: sessionId }
+  return { sessionId, grantId }
 }
 
-// ---------- stage 3: shop, propose, order ----------
-async function shop(deps: Deps, req: AgentRequest, grantId: string, sessionId: string, rules: Rules, extra?: string): Promise<AgentReply> {
+const emptyRules = (): Rules => finishRules({
+  budget_max_cents: null, size_min_cm: null, size_max_cm: null, colour_preference: null,
+  delivery_by: null, return_policy_required: null, product_scope: null,
+})
+
+// Nothing is written until the customer orders. The reply that picks a product and names a payment is the
+// customer's confirmation: it opens the session, seals the grant from the rules gathered so far, then records the order.
+export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
+  const req = parseRequest(raw)
+  if (typeof req === 'string') return { type: 'error', message: req }
   const { store } = deps
   const t = today(deps)
-  const products = await store.listProducts()
-  const byId = new Map(products.map((p) => [p.id, p]))
 
-  if (await store.hasStep(sessionId, 'order_received')) {
-    return { type: 'message', text: 'Your order has already been placed.', session_id: sessionId, steps: [] }
+  if (req.session_id && (await store.hasStep(req.session_id, 'order_received'))) {
+    return { type: 'message', text: 'Your order has already been placed.', session_id: req.session_id, steps: [] }
   }
 
-  const reply = await runLoop(deps, shopPrompt(t, rules, req.offers), req.messages, SHOP_TOOLS, async (name, args) => {
+  const products = await store.listProducts()
+  const byId = new Map(products.map((p) => [p.id, p]))
+  const ctx: { rules: Rules | null } = { rules: req.draft }
+
+  const reply = await runLoop(deps, prompt(t, ctx.rules, req.offers), req.messages, TOOLS, async (name, args) => {
+    if (name === 'set_order_rules') {
+      ctx.rules = rulesFromModel(args, t)
+      return { result: { ok: true } }
+    }
     if (name === 'search_products') {
       const cat = args.category === 'snowboard' || args.category === 'ski' ? args.category : null
       const maxDollars = toNum(args.max_item_price_dollars)
@@ -541,11 +517,10 @@ async function shop(deps: Deps, req: AgentRequest, grantId: string, sessionId: s
     }
     if (name === 'get_product') {
       const p = typeof args.product_id === 'string' ? byId.get(args.product_id) : undefined
-      if (!p) return { result: { error: 'No such product. Use a product_id from search_products.' } }
-      await store.addAction(grantId, 'view', { product_id: p.id, product_name: p.name }, null)
-      return { result: productView(p, t) }
+      return { result: p ? productView(p, t) : { error: 'No such product. Use a product_id from search_products.' } }
     }
     if (name === 'propose_products') {
+      if (!ctx.rules) return { result: { error: "Call set_order_rules first, with only what the customer said." } }
       const raw = Array.isArray(args.offers) ? args.offers.slice(0, 2) : []
       const offers: Offer[] = []
       for (const o of raw as Record<string, unknown>[]) {
@@ -563,16 +538,22 @@ async function shop(deps: Deps, req: AgentRequest, grantId: string, sessionId: s
         })
       }
       if (offers.length === 0) return { result: { error: 'Offer at least one product.' } }
-      const text = clean(args.message, 300) ?? 'Here are my picks.'
-      return { result: { ok: true, shown: offers.length }, done: { type: 'proposals', text, offers } }
+      const text = clean(args.message, 300) ?? 'Here are my picks from Northwind:'
+      const follow_up = args.payment_stated === true ? "Pick one and I'll place the order." : 'Pick one, and tell me which payment to charge.'
+      return { result: { ok: true, shown: offers.length }, done: { type: 'proposals', text, offers, follow_up } }
     }
     if (name === 'place_order') {
       const pid = typeof args.product_id === 'string' ? args.product_id : ''
       const offer = req.offers.find((o) => o.product_id === pid)
       const p = byId.get(pid)
       if (!offer || !p) return { result: { error: 'The customer has not been shown that option yet. Propose it first.' } }
+      const pay = clean(args.payment_method, 60)
+      if (!pay) return { result: { error: 'The customer has not said how they will pay. Ask only which payment to charge.' } }
+      if (!/paypal/i.test(pay)) return { result: { error: 'Only PayPal is accepted here. Tell the customer.' } }
       const pd = priceAndDelivery(p, offer.shipping_method, t)
       if (!pd) return { result: { error: 'That shipping method is not available.' } }
+
+      const { sessionId, grantId } = await openSession(deps, req, ctx.rules ?? emptyRules())
       const confirmed_at = deps.now().toISOString()
       const proposalId = deps.newId()
       await store.addProposal({
@@ -593,25 +574,9 @@ async function shop(deps: Deps, req: AgentRequest, grantId: string, sessionId: s
         shipping_label: offer.shipping_method === 'expedited' ? 'Expedited shipping' : 'Standard shipping',
         shipping_cents: pd.shipping_cents, total_cents: pd.total_cents, delivery_label: pd.delivery_label, payment_label: PAYMENT_LABEL,
       }
-      return { result: { ok: true, placed: true }, done: { type: 'ordered', text: 'Your order is placed.', order } }
+      return { result: { ok: true, placed: true }, done: { type: 'ordered', text: 'Your order is placed.', order, session_id: sessionId } }
     }
     return { result: { error: `Unknown tool ${name}` } }
-  }, extra)
-  return { ...reply, session_id: sessionId }
-}
-
-// ---------- entry point ----------
-export async function handle(raw: unknown, deps: Deps): Promise<AgentReply> {
-  const req = parseRequest(raw)
-  if (typeof req === 'string') return { type: 'error', message: req }
-  if (req.confirm) {
-    if (!req.draft) return { type: 'error', message: 'There are no order rules to confirm yet.' }
-    return confirmRules(deps, req, req.draft)
-  }
-  if (req.session_id) {
-    const g = await deps.store.getGrant(req.session_id)
-    if (!g) return { type: 'error', message: 'That session was not found. Please start a new chat.' }
-    return shop(deps, req, g.grantId, req.session_id, g.rules)
-  }
-  return intake(deps, req)
+  })
+  return ctx.rules ? { ...reply, draft: ctx.rules } : reply
 }

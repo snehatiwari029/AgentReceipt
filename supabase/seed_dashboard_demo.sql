@@ -33,11 +33,15 @@ $$;
 
 -- Catalog facts the seeded orders depend on (data only, not schema):
 --  * Burton Spellbinder colourway is Serpent.
---  * Expedited delivery takes 2 days (Mon 26 Oct + 2 = Wed 28 Oct); free standard takes 5-7 days (Amendment 6).
+--  * Expedited delivery takes 2 days (Mon 26 Oct + 2 = Wed 28 Oct); free standard takes 5-7 days, except the Orca at 3 days (Amendment 6).
 --    Nitro Alternator has the same expedited terms.
 update products set colour = 'Serpent', expedited_delivery_days = 2 where id = '40c70768-77ac-4953-8bae-c75c8319fcf4'::uuid;
 update products set expedited_delivery_days = 2 where id = '9a3f8acb-8e2f-4ffe-b83c-085d54b96765'::uuid;
-update products set standard_delivery_days = 5 + (sort_order % 3) where standard_shipping_cents = 0 and expedited_shipping_cents is null;
+update products set standard_delivery_days = v.d from (values
+  ('T. Rice Orca Snowboard 2025/2026', 3), ('Outerspace Living Snowboard 2025/2026', 6), ('Assassin Snowboard 2025/2026', 7),
+  ('Airheart 2.0 Snowboard Women''s 2025/2026', 6), ('Bent 85 Skis with Bindings 2026/2027', 6),
+  ('QST 92 Skis with Bindings 2025/2026', 7), ('Sender Soul 92 Skis with Bindings 2025/2026', 5)
+) as v(n, d) where products.name = v.n;
 
 insert into sessions (id, merchant_id, detection_source, agent_id, agent_verified, agent_verified_simulated, gap_note, opened_at) values (
   'e5262b18-5dfc-470d-a1dc-556a936b48df'::uuid,

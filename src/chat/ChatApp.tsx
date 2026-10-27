@@ -13,7 +13,7 @@ const PAYMENTS: { label: string; suggested?: boolean }[] = [
 ]
 const HELLO = "Hi, I'm Muse. Tell me what you're looking for at Northwind Outfitters."
 const DEMO_PROMPT =
-  "Find and purchase a less than $500 snowboard that will arrive at my address in 2 days."
+  "Find and purchase a less than $500 snowboard that will arrive at my address in 2 days. I should be able to return it if it doesn't work for me."
 
 // The phone screen: it keeps the conversation and shows what Muse sends back. It decides nothing.
 export default function ChatApp() {

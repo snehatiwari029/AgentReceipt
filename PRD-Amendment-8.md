@@ -31,8 +31,6 @@ Source: Sneha's detection-engine spec and PRD v1.0 section 8 (governing). This a
 4. `shopper-agent` separation test now allows one thing: index.ts posts the session id to the order system. The agent code itself is unchanged
    and still cannot see terms, verdicts or receipts.
 
-## Open conflicts flagged for Sneha
-- Live 2-day prompt has no returns rule, so Returns is "not specified, no check" and the live hero shows 1 problem (Budget), not 2.
-  PRD v1 section 8 line "problems = 2 if grant is total" cannot happen with that prompt. Either add the returns line to the prompt, or accept 1 problem.
-- Store data: free standard shipping is now 5-7 days for every product (her instruction), including the Orca. With the Friday prompt the Orca
-  (standard, 5 days) arrives Sat Oct 31 and is refused, so Scenario B cannot be reproduced live with the Friday prompt. Seeded 13422 shows the Orca at 3 days.
+## Conflicts flagged and resolved (Sneha, Oct 26 evening)
+- Live prompt: the returns line was added back so the live hero shows 2 problems (Budget, Returns). The prompt changed from the 2-day PRD v1 text, with her approval.
+- Store data: free standard shipping is 5-7 days for every product except the Orca at 3 days, so Scenario B still works with the Friday prompt (Orca arrives Thu Oct 29).

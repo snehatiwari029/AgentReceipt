@@ -1,4 +1,4 @@
-import type { ReturnsTerm } from '../types'
+import type { ReturnsTerm } from './types'
 
 export function formatMoney(cents: number, currency = 'USD'): string {
   const whole = cents % 100 === 0

@@ -3,7 +3,7 @@ type Props = {
 }
 
 // Store header as an agent / shopper sees it: brand, tagline, category nav, cart.
-// No links to any other view live here, by design.
+// Only same-page category anchors live here.
 export default function StoreHeader({ cartCount }: Props) {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">

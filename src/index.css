@@ -6,8 +6,8 @@
   STORE (this file's body defaults): light retail theme. White page, dark text, plain
   product cards. Store components use only Tailwind's neutral palette (slate / emerald).
 
-  DASHBOARD (later, not built yet): dark theme only. These tokens are reserved for it and
-  must NOT be used by anything under src/components/ (a test enforces that).
+  DASHBOARD (src/dashboard): dark theme only. These tokens are reserved for it and
+  must NOT be used by anything under src/shop/ (a test enforces that).
 */
 @theme {
   --color-dash-page-top: #0a1128;

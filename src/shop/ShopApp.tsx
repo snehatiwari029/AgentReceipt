@@ -2,13 +2,11 @@ import { useState } from 'react'
 import StoreHeader from './components/StoreHeader'
 import ProductSection from './components/ProductSection'
 import ProductDetails from './components/ProductDetails'
-import { useProducts } from './hooks/useProducts'
-import type { Product } from './types'
+import { useProducts } from '../shared/useProducts'
+import type { Product } from '../shared/types'
 
-// This view is the demo store exactly as a shopper or an agent sees it, in a light retail theme.
-// The merchant dashboard (dark theme) and the customer phone chat are separate views that will be
-// reached from a demo entry page, never from this header.
-export default function App() {
+// The demo store exactly as a shopper or an agent sees it, in a light retail theme.
+export default function ShopApp() {
   const state = useProducts()
   const [cartCount, setCartCount] = useState(0)
   const [selected, setSelected] = useState<Product | null>(null)

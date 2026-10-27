@@ -1,5 +1,5 @@
-import type { Product } from '../types'
-import { formatMoney } from '../lib/format'
+import type { Product } from '../../shared/types'
+import { formatMoney } from '../../shared/format'
 import ProductImage from './ProductImage'
 import ReturnsChip from './ReturnsChip'
 

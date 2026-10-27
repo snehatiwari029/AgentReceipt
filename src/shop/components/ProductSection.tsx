@@ -1,4 +1,4 @@
-import type { Product } from '../types'
+import type { Product } from '../../shared/types'
 import ProductCard from './ProductCard'
 
 type Props = {

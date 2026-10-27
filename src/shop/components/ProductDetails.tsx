@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import type { Product } from '../types'
-import { daysLabel, formatMoney, shippingLabel } from '../lib/format'
+import type { Product } from '../../shared/types'
+import { daysLabel, formatMoney, shippingLabel } from '../../shared/format'
 import ProductImage from './ProductImage'
 import ReturnsChip from './ReturnsChip'
 

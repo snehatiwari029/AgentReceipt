@@ -1,5 +1,5 @@
-import type { Product } from '../types'
-import { swatchColours } from '../lib/format'
+import type { Product } from '../../shared/types'
+import { swatchColours } from '../../shared/format'
 
 // Shows image_url when the products row has one. Until Muse Image product photos
 // are generated and stored, it draws a neutral placeholder tinted with the product's

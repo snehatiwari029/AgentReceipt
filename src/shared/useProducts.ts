@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
-import type { Product } from '../types'
+import { supabase } from './supabase'
+import type { Product } from './types'
 
 export type ProductsState =
   | { status: 'loading' }

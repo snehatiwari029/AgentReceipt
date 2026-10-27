@@ -1,5 +1,5 @@
-import type { ReturnsTerm } from '../types'
-import { returnsLabel } from '../lib/format'
+import type { ReturnsTerm } from '../../shared/types'
+import { returnsLabel } from '../../shared/format'
 
 // Neutral styling on purpose: red and amber are reserved for violations on the merchant side.
 // The meaning is carried by the text and the icon, never by colour alone.

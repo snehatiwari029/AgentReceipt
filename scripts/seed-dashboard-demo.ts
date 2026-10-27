@@ -301,10 +301,11 @@ $$;
 
 -- Catalog facts the seeded orders depend on (data only, not schema):
 --  * Burton Spellbinder colourway is Serpent.
---  * Expedited delivery takes 4 days (Mon 26 Oct + 4 = Fri 30 Oct); standard takes 5 days, so it misses Friday.
+--  * Expedited delivery takes 2 days (Mon 26 Oct + 2 = Wed 28 Oct); free standard takes 5-7 days (Amendment 6).
 --    Nitro Alternator has the same expedited terms.
-update products set colour = 'Serpent', expedited_delivery_days = 4 where id = ${q(BURTON_ID)}::uuid;
-update products set expedited_delivery_days = 4 where id = ${q(NITRO_ID)}::uuid;
+update products set colour = 'Serpent', expedited_delivery_days = 2 where id = ${q(BURTON_ID)}::uuid;
+update products set expedited_delivery_days = 2 where id = ${q(NITRO_ID)}::uuid;
+update products set standard_delivery_days = 5 + (sort_order % 3) where standard_shipping_cents = 0 and expedited_shipping_cents is null;
 
 ${body}
 

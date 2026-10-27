@@ -6,7 +6,7 @@ import type { AgentReply, ChatItem, OfferCardData } from './types'
 
 const HELLO = "Hi, I'm Muse. Tell me what you're looking for at Northwind Outfitters."
 const DEMO_PROMPT =
-  "Help me place an order for a snowboard for this weekend trip with my friends. It should look cool, size 150-165 cm, I need it by Friday. Budget under $500. I should be able to return it if it doesn't work for me."
+  "Find and purchase a less than $500 snowboard that will arrive at my address in 2 days."
 
 // The phone screen: it keeps the conversation and shows what Muse sends back. It decides nothing.
 export default function ChatApp() {

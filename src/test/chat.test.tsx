@@ -47,7 +47,7 @@ describe('/chat phone screen', () => {
     const chip = screen.getByRole('button', { name: /Try the demo test sequence/ })
     expect(chip).toHaveTextContent('Recommended')
     await user.click(chip)
-    expect((screen.getByLabelText('Message Muse') as HTMLInputElement).value).toMatch(/^Help me place an order for a snowboard/)
+    expect((screen.getByLabelText('Message Muse') as HTMLInputElement).value).toMatch(/^Find and purchase a less than \$500 snowboard/)
   })
 
   it('runs the hero conversation as chat: sentence, two cards, payment question, then the order', async () => {

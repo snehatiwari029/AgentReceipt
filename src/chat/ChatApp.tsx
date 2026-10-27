@@ -1,0 +1,119 @@
+import { useEffect, useRef, useState } from 'react'
+import { askAgent } from './api'
+import PhoneFrame from './PhoneFrame'
+import { Bubble, OfferCard, OrderCard, RulesCard, StatusLine } from './Cards'
+import type { AgentReply, ChatItem, OfferCardData } from './types'
+
+const HELLO = "Hi, I'm Muse. Tell me what you're looking for at Northwind Outfitters: what, your budget, size, and when you need it."
+
+// The phone screen: it keeps the conversation and shows what Muse sends back. It decides nothing.
+export default function ChatApp() {
+  const [items, setItems] = useState<ChatItem[]>([{ id: 0, kind: 'muse', text: HELLO }])
+  const [draft, setDraft] = useState<unknown>(null)
+  const [offers, setOffers] = useState<unknown[]>([])
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [ordered, setOrdered] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [text, setText] = useState('')
+  const next = useRef(1)
+  const end = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [items, busy])
+
+  const id = () => next.current++
+  // Only words go back to Muse: what the customer typed and what Muse said.
+  const words = (list: ChatItem[]): { role: 'user' | 'assistant'; text: string }[] =>
+    list.flatMap((i): { role: 'user' | 'assistant'; text: string }[] =>
+      i.kind === 'me' ? [{ role: 'user', text: i.text }] : i.kind === 'muse' ? [{ role: 'assistant', text: i.text }] : [])
+
+  function show(reply: AgentReply, base: ChatItem[]) {
+    const add: ChatItem[] = (reply.steps ?? []).map((s) => ({ id: id(), kind: 'status', text: s }))
+    if (reply.session_id) setSessionId(reply.session_id)
+    if (reply.type === 'message') add.push({ id: id(), kind: 'muse', text: reply.text })
+    else if (reply.type === 'confirm_rules') {
+      setDraft(reply.draft)
+      add.push({ id: id(), kind: 'muse', text: reply.text }, { id: id(), kind: 'rules', view: reply.view, state: 'open' })
+    } else if (reply.type === 'proposals') {
+      setOffers(reply.offers)
+      add.push({ id: id(), kind: 'muse', text: reply.text }, { id: id(), kind: 'offers', offers: reply.offers })
+    } else if (reply.type === 'ordered') {
+      setOrdered(true)
+      add.push({ id: id(), kind: 'muse', text: reply.text }, { id: id(), kind: 'order', order: reply.order })
+    } else add.push({ id: id(), kind: 'problem', text: reply.message })
+    setItems([...base, ...add])
+  }
+
+  async function send(raw: string) {
+    const t = raw.trim()
+    if (!t || busy || ordered) return
+    const base: ChatItem[] = [...items, { id: id(), kind: 'me', text: t }]
+    setItems(base)
+    setText('')
+    setBusy(true)
+    const reply = await askAgent({ messages: words(base), session_id: sessionId, offers })
+    setBusy(false)
+    show(reply, base)
+  }
+
+  async function confirm() {
+    if (busy) return
+    const base = items.map((i) => (i.kind === 'rules' && i.state === 'open' ? { ...i, state: 'confirmed' as const } : i))
+    setItems(base)
+    setBusy(true)
+    const reply = await askAgent({ messages: words(base), confirm: true, draft })
+    setBusy(false)
+    show(reply, base)
+  }
+
+  function change() {
+    const base: ChatItem[] = [
+      ...items.map((i) => (i.kind === 'rules' && i.state === 'open' ? { ...i, state: 'changed' as const } : i)),
+      { id: id(), kind: 'muse', text: 'Sure. Tell me what to change.' },
+    ]
+    setDraft(null)
+    setItems(base)
+  }
+
+  const orderIt = (o: OfferCardData) => send(`Order it: the ${o.brand ? `${o.brand} ` : ''}${o.name}. Use my PayPal account for checkout.`)
+
+  return (
+    <PhoneFrame
+      footer={
+        <form onSubmit={(e) => { e.preventDefault(); void send(text) }} className="flex gap-2">
+          <input
+            aria-label="Message Muse"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={1000}
+            disabled={busy || ordered}
+            placeholder={ordered ? 'Your order is placed' : 'Message Muse'}
+            className="min-w-0 flex-1 rounded-full border border-neutral-300 px-4 py-2 text-sm text-neutral-900 outline-none focus:border-indigo-500 disabled:bg-neutral-100"
+          />
+          <button type="submit" disabled={busy || ordered || !text.trim()} className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            Send
+          </button>
+        </form>
+      }
+    >
+      <div role="log" aria-live="polite" className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
+        {items.map((i) => {
+          switch (i.kind) {
+            case 'me': return <Bubble key={i.id} side="me">{i.text}</Bubble>
+            case 'muse': return <Bubble key={i.id} side="muse">{i.text}</Bubble>
+            case 'status': return <StatusLine key={i.id}>{i.text}</StatusLine>
+            case 'rules': return <RulesCard key={i.id} view={i.view} state={i.state} disabled={busy} onConfirm={() => void confirm()} onChange={change} />
+            case 'offers': return (
+              <div key={i.id} className="space-y-3">
+                {i.offers.map((o) => <OfferCard key={o.product_id} offer={o} disabled={busy || ordered} onOrder={() => void orderIt(o)} />)}
+              </div>
+            )
+            case 'order': return <OrderCard key={i.id} order={i.order} />
+            case 'problem': return <p key={i.id} role="alert" className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{i.text}</p>
+          }
+        })}
+        {busy && <StatusLine>Muse is thinking…</StatusLine>}
+        <div ref={end} />
+      </div>
+    </PhoneFrame>
+  )
+}

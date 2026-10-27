@@ -53,4 +53,72 @@ describe('Audience separation', () => {
       expect(text, name).not.toMatch(/lovable|github\.com|gptengineer/i)
     }
   })
+
+  it('the phone screen (chat) mentions no merchant-side words and holds no brain logic or keys', () => {
+    const forbidden = /dashboard|grant|receipt|tamper|dispute|verdict|auditor|mismatch|\/admin/i
+    const brain = /MODEL_API_KEY|api\.meta\.ai|muse-spark|terms_text|formal_|service_role|sb_secret/i
+    const dashLook = /dash-|teal|#0a1128|#0b0f1a|#16233a|#1e2a44|#26365e|#2dd4bf/i
+    for (const [name, text] of read('chat')) {
+      expect(text, name).not.toMatch(forbidden)
+      expect(text, name).not.toMatch(brain)
+      expect(text, name).not.toMatch(dashLook)
+      expect(text, name).not.toMatch(/lovable|github\.com/i)
+      for (const spec of importsOf(text)) {
+        expect(spec, name).not.toMatch(/dashboard|(^|\/)shop(\/|$)|supabase|shared\/(supabase|useProducts|schemas|chain)/i)
+      }
+    }
+  })
+
+  it('the phone screen calls only the shopper-agent function', () => {
+    const urls = read('chat').flatMap(([, text]) => [...text.matchAll(/functions\/v1\/([a-z-]+)/g)].map((m) => m[1]))
+    expect(urls).toEqual(['shopper-agent'])
+  })
+
+  it('shop and dashboard never import the phone screen', () => {
+    for (const [name, text] of [...read('shop'), ...read('dashboard'), ...read('shared')]) {
+      for (const spec of importsOf(text)) expect(spec, name).not.toMatch(/(^|\/)chat(\/|$)/)
+    }
+  })
+})
+
+describe('Shopper agent function (the brain)', () => {
+  const FN = join(SRC, '..', 'supabase', 'functions', 'shopper-agent')
+  const code = () =>
+    readdirSync(FN).filter((f) => f.endsWith('.ts') && f !== 'hash.ts')
+      .map((f) => [f, readFileSync(join(FN, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '')] as const)
+
+  it('never reads formal terms, auditor output, receipts, disputes or dashboard data', () => {
+    for (const [name, text] of code()) {
+      expect(text, name).not.toMatch(/terms_text|formal_|verdict|auditor|mismatch|dispute|dashboard|tamper/i)
+      expect(text, name).not.toMatch(/from\(\s*['"](receipts|disputes|dispute_events)['"]/)
+      expect(text, name).not.toMatch(/select\(\s*['"`]\*['"`]/)
+    }
+  })
+
+  it('reads only the allowed product columns', () => {
+    const store = readFileSync(join(FN, 'store.ts'), 'utf8')
+    const cols = /PRODUCT_COLUMNS =\s*'([^']+)'/.exec(store)![1].split(',')
+    expect(cols).toEqual(['id', 'name', 'brand', 'category', 'size_cm', 'colour', 'price_cents', 'currency', 'marketing_blurb', 'standard_shipping_cents', 'standard_delivery_days', 'expedited_shipping_cents', 'expedited_delivery_days'])
+  })
+
+  it('reads the model key only from the environment, by name', () => {
+    const index = readFileSync(join(FN, 'index.ts'), 'utf8')
+    expect(index).toContain("Deno.env.get('MODEL_API_KEY')")
+    expect(index).not.toMatch(/MODEL_API_KEY\s*=/)
+  })
+
+  it('keeps its copy of the hash spec identical to the shared one', () => {
+    expect(readFileSync(join(FN, 'hash.ts'), 'utf8')).toBe(readFileSync(join(FN, '..', '_shared', 'hash.ts'), 'utf8'))
+  })
+
+  it('has no secret key or token in the repo', () => {
+    const root = join(SRC, '..')
+    const scan = [...files(SRC), ...files(join(root, 'supabase')), ...files(join(root, 'scripts')), join(root, '.env.example'), join(root, 'README.md')]
+    for (const p of scan) {
+      if (!/\.(ts|tsx|sql|md|json|example)$/.test(p) && !p.endsWith('.env.example')) continue
+      const text = readFileSync(p, 'utf8')
+      expect(text, p).not.toMatch(/sb_secret_[A-Za-z0-9]|eyJ[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{20,}/)
+      expect(text, p).not.toMatch(/MODEL_API_KEY\s*=\s*[^\s#]/)
+    }
+  })
 })

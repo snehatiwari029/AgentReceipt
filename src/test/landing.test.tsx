@@ -68,8 +68,11 @@ describe('Home page', () => {
   it('How it works: three steps once, no tables, and the signal note', () => {
     home()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
-    expect(screen.getAllByText('Customer authorizes, as fields, hash-sealed')).toHaveLength(1)
-    expect(screen.getByText('Pass / Review Required / Hold for Suspicion, in real time, before fulfillment')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Grant\.\s*Action\.\s*Verdict\./ })).toBeInTheDocument()
+    for (const line of ['What the customer told the agent', 'What the agent actually ordered', 'Ship, Review required or Hold decision']) {
+      expect(screen.getAllByText(line)).toHaveLength(1)
+    }
+    expect(screen.queryByText('Customer authorizes, as fields, hash-sealed')).not.toBeInTheDocument()
     expect(screen.getByText(/returns a signal, it does not block checkout itself/)).toBeInTheDocument()
   })
 

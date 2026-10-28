@@ -85,10 +85,11 @@ export const content = {
     eyebrow: 'How it works',
     headlineLines: ['Grant.', 'Action.'],
     headlineEmphasis: 'Verdict.',
+    // Right-hand lines. The big Grant. Action. Verdict. headline stays on the left.
     items: [
-      { num: '01', title: 'Grant', body: 'Customer authorizes, as fields, hash-sealed', icon: 'fingerprint' },
-      { num: '02', title: 'Action', body: 'Agent orders, action recorded beside the grant', icon: 'package' },
-      { num: '03', title: 'Verdict', body: 'Pass / Review Required / Hold for Suspicion, in real time, before fulfillment', icon: 'shield' },
+      { num: '01', text: 'What the customer told the agent', icon: 'fingerprint' },
+      { num: '02', text: 'What the agent actually ordered', icon: 'package' },
+      { num: '03', text: 'Ship, Review required or Hold decision', icon: 'shield' },
     ],
     note: 'AgentReceipt returns a signal, it does not block checkout itself — your order system holds shipment based on that signal. It shows mismatch facts only, it does not decide liability.',
   },

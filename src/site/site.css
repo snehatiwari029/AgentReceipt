@@ -216,3 +216,5 @@
   .site .card-stage { flex-direction: column; align-items: stretch; }
   .site .page-head { padding: 56px 0 48px; }
 }
+
+.site .step-line { font-size: clamp(20px, 2vw, 26px); font-weight: 500; letter-spacing: -0.01em; color: var(--c-ink); }

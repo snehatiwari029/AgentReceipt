@@ -133,7 +133,7 @@ export default function LandingPage() {
                 {c.steps.items.map((s) => (
                   <div className="step" key={s.num}>
                     <span className="step-num">{s.num}</span>
-                    <div><h3>{s.title}</h3><p>{s.body}</p></div>
+                    <p className="step-line">{s.text}</p>
                     <span className="step-ico">{iconFor(s.icon)}</span>
                   </div>
                 ))}

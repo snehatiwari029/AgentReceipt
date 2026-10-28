@@ -47,7 +47,7 @@ export const content = {
       sideNote: 'not a verdict.',
     },
     tags: [
-      { merchant: 'Merchant 1 using AgentReceipt', outcome: 'Order Fulfilled, Chargeback Received', tone: 'bad' },
+      { merchant: 'Merchant 1 not using AgentReceipt', outcome: 'Order Fulfilled, Chargeback Received', tone: 'bad' },
       { merchant: 'Merchant 2 using AgentReceipt', outcome: 'Order Held and Confirmed, Chargeback Prevented', tone: 'good' },
     ] as { merchant: string; outcome: string; tone: 'good' | 'bad' }[],
   },
@@ -224,7 +224,7 @@ export const content = {
   footer: {
     line: 'AgentReceipt — Trust layer for agentic shopping.',
     links: [
-      { label: 'LinkedIn', href: '#', external: true }, // PLACEHOLDER: add the LinkedIn address
+      { label: 'LinkedIn', href: 'https://www.linkedin.com/in/snehatiwari02', external: true },
       { label: 'Dashboard', href: '/dashboard', external: false },
       { label: 'Store', href: '/shop', external: false },
     ],

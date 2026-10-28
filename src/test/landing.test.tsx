@@ -31,7 +31,7 @@ describe('Home page', () => {
     const stage = container.querySelector('.card-stage') as HTMLElement
     const tags = stage.querySelectorAll('.tag')
     expect(tags).toHaveLength(2)
-    expect(stage).toHaveTextContent('Merchant 1 using AgentReceipt')
+    expect(stage).toHaveTextContent('Merchant 1 not using AgentReceipt')
     expect(stage).toHaveTextContent('Order Fulfilled, Chargeback Received')
     expect(stage).toHaveTextContent('Merchant 2 using AgentReceipt')
     expect(stage).toHaveTextContent('Order Held and Confirmed, Chargeback Prevented')
@@ -100,6 +100,7 @@ describe('Home page', () => {
     home()
     const foot = screen.getByRole('navigation', { name: 'Footer' })
     expect(within(foot).getAllByRole('link').map((a) => a.textContent)).toEqual(['LinkedIn', 'Dashboard', 'Store'])
+    expect(within(foot).getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', 'https://www.linkedin.com/in/snehatiwari02')
     expect(within(foot).getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/dashboard')
     expect(within(foot).getByRole('link', { name: 'Store' })).toHaveAttribute('href', '/shop')
     expect(screen.queryByText(/github/i)).not.toBeInTheDocument()

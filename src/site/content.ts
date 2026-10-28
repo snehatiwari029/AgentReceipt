@@ -1,34 +1,33 @@
-// ALL the words on the public page live in this one file. Change a string here and the page changes. No code knowledge needed.
-// Keep the quotes and commas as they are. Lines marked PLACEHOLDER are stand-in text waiting for your real wording.
-// Rules for any new copy: no blockchain wording, no real-payment wording, never claim "nobody records intent"
+// ALL the words on the public site (home page and Products page) live in this one file. Change a string here and the site changes.
+// Keep the quotes and commas as they are. Lines marked PLACEHOLDER are stand-in values waiting for real ones.
+// Copy rules: no blockchain wording, no real-payment wording, never claim "nobody records intent"
 // (Verifiable Intent, AP2, Visa TAP and others exist). Say what AgentReceipt does: a merchant-side check and record.
 
-export type Door = { to: string; title: string; note: string }
+export type FaqLine = { t: string; to?: string; toLabel?: string }
 
 export const content = {
   brand: 'AgentReceipt',
 
   nav: {
     links: [
-      { label: 'How it works', href: '#how-it-works' },
-      { label: 'Products', href: '#products' },
-      { label: 'FAQ', href: '#faq' },
-      { label: 'Pilot', href: '#pilot' },
-    ],
+      { label: 'How it works', hash: 'how-it-works' },
+      { label: 'Products', to: '/products' },
+      { label: 'FAQ', hash: 'faq' },
+      { label: 'Pilot', hash: 'pilot' },
+    ] as { label: string; hash?: string; to?: string }[],
     loginLabel: 'Login for demo',
     loginTo: '/dashboard', // the merchant dashboard has its own one-tap demo sign-in
   },
 
   hero: {
-    eyebrow: 'Your trust partner for agent shopping',
-    // Headline = before + (emphasis, shown in green italic) + after. Use "\n" for a line break.
+    // Headline = before + (emphasis, shown in green italic) + after. "\n" is a line break.
     headlineBefore: 'Trust layer for\n',
     headlineEmphasis: 'agentic',
     headlineAfter: '\nshopping',
     body: 'As your customers are changing from humans to agents, we help you in that transition with the tools you need to run your business successfully.',
     primaryCta: 'Login for demo',
     secondaryCta: 'See how it works',
-    // The tilted sample receipt on the right. Values are examples only.
+    // The tilted sample receipt on the right (example values) and the two badge tags laid over it.
     card: {
       orderLabel: 'ORDER',
       orderNumber: '08.142',
@@ -47,70 +46,98 @@ export const content = {
       footnote: 'Mismatch facts · not a liability decision',
       sideNote: 'not a verdict.',
     },
+    tags: [
+      { merchant: 'Merchant 1 using AgentReceipt', outcome: 'Order Fulfilled, Chargeback Received', tone: 'bad' },
+      { merchant: 'Merchant 2 using AgentReceipt', outcome: 'Order Held and Confirmed, Chargeback Prevented', tone: 'good' },
+    ] as { merchant: string; outcome: string; tone: 'good' | 'bad' }[],
   },
 
-  gap: {
-    eyebrow: 'The authorization gap',
-    headline: 'You see an order placed by an agent, but not what the customer authorized it to do.',
-    body: "As an agent orders on a customer's behalf, it can make mistakes — whether it misinterprets the customer's needs or misunderstands a listing built for human shoppers. Errors happen, and they shouldn't cost you a chargeback and a lost product.",
-    pullQuote: 'A purchase should come with a record of what was actually authorized.',
-    footLabel: '01 / What changes with agent shopping',
+  problem: {
+    eyebrow: 'The problem',
+    headline: 'You see the order, not the authorization.',
+    body: "A customer tells an agent to buy product on their behalf. The agent orders, you see only the order and payment authorization — not what the customer asked the agent to order and conditions associated, there's no proof that the agent did what it was asked to do. If agent does something customer didnt specify or misleads, you get a chargeback. it's he-said-she-said, and you lose.",
   },
 
-  partner: {
+  whatWeDo: {
     eyebrow: 'A practical trust partner',
-    headline: 'The right facts.\nAt the right moment.',
-    columns: [
+    headline: 'What we do for you',
+    cards: [
       {
-        tag: '01 — Before fulfillment',
+        tag: '01',
         title: 'Catch it before you ship',
         body: "Agent orders are checked at order received, before fulfillment. If the order doesn't match what the customer authorized — budget, returns, delivery, size — it's flagged Review Required or Hold for Suspicion, and you hold shipment until you review it.",
       },
       {
-        tag: '02 — If it disputes',
+        tag: '02',
         title: 'Prove it if it disputes anyway',
-        // Reworded from the original slide on purpose: no represent / concede language, no chargeback-fee claim.
-        body: 'Every order gets a tamper-evident, hash-sealed record of what the customer authorized and what the agent did. If a dispute comes in, download the evidence pack in one click: grant, action, receipt and the line-by-line check.',
+        body: 'Every order gets an immutable record of intent and auth, hash-sealed, that you can download in one click as a chargeback representation package. Show grant vs action vs receipt, represent with proof, or concede early and save the chargeback fee.',
       },
       {
-        tag: '03 — Fix & optimize listings',
-        title: 'Fix & optimize listings',
-        body: 'Helps prevent agents from misunderstanding your offerings or missing details by optimizing your listings for agents. It not only helps prevent erroneous orders, but can also help drive additional orders.',
+        tag: '03',
+        title: 'Improve it',
+        body: 'The agent audits your listings and suggests ways to structure listing for agents shopping on customer behalf to be able to read and interpret correctly.',
       },
     ],
   },
 
   steps: {
     id: 'how-it-works',
-    eyebrow: 'A clear record at every step',
+    eyebrow: 'How it works',
     headlineLines: ['Grant.', 'Action.'],
     headlineEmphasis: 'Verdict.',
-    body: 'Fields, not chat. A neutral checkpoint between an agent order and fulfillment.',
     items: [
       { num: '01', title: 'Grant', body: 'Customer authorizes, as fields, hash-sealed', icon: 'fingerprint' },
       { num: '02', title: 'Action', body: 'Agent orders, action recorded beside the grant', icon: 'package' },
       { num: '03', title: 'Verdict', body: 'Pass / Review Required / Hold for Suspicion, in real time, before fulfillment', icon: 'shield' },
     ],
+    note: 'AgentReceipt returns a signal, it does not block checkout itself — your order system holds shipment based on that signal. It shows mismatch facts only, it does not decide liability.',
   },
 
-  // PLACEHOLDER section: no slide was provided for Products. Replace the wording when you have it.
-  products: {
+  // Home page Products block: exactly three tools. The long explanations are on the Products page (below).
+  productsHome: {
     id: 'products',
     eyebrow: 'Products',
-    headline: 'What AgentReceipt gives your team.',
-    intro: 'Three tools, one record. (Placeholder wording: replace with your product descriptions.)',
+    headline: 'Three tools. One record.',
+    moreLabel: 'See all products',
+    moreTo: '/products',
+  },
+
+  // The Products page (/products): exactly three products, two paragraphs each.
+  products: {
+    eyebrow: 'Products',
+    headline: 'Three products, one record.',
+    intro: 'Order check before you ship, an evidence pack if it disputes anyway, and a listing optimizer so agents read your listings correctly.',
     items: [
-      { title: 'Order check', body: 'Compares the customer’s grant, your formal terms and the agent’s action line by line, and returns Pass, Review Required or Hold for Suspicion before you ship.' },
-      { title: 'Evidence pack', body: 'A downloadable record for a disputed order: grant, action, hash-chained receipt and the verdict table. No customer chat included.' },
-      { title: 'Listing optimizer', body: 'Spots listing wording that agents misread, such as marketing text that differs from formal terms, and suggests a fix for you to approve.' },
+      {
+        id: 'order-check',
+        title: 'Order check',
+        short: 'Catches mismatches before fulfillment.',
+        paras: [
+          "Agent orders are checked at order received, before fulfillment, against what the customer actually authorized — budget including shipping, returns, delivery date, size, and product scope. If the agent's order doesn't match, it's flagged Review Required when the record is trustworthy but a field mismatches, or Hold for Suspicion when the record itself can't be trusted.",
+          "This is the checkpoint merchants are missing today. Existing fraud tools check card fraud, not authorization mismatch, and intent protocols alone give you an authorization, not a verdict. Catching the mismatch before you ship prevents the dispute, the return, and the chargeback fee — instead of finding out about it after the product has left your warehouse.",
+        ],
+      },
+      {
+        id: 'evidence-pack',
+        title: 'Evidence pack',
+        short: 'A downloadable evidence pack for a disputed shipped order.',
+        paras: [
+          'For a separate shipped order that later disputes, the immutable record of intent and auth — grant, action, formal terms, and hash-chained receipt, stored as fields only with no full customer chat — is transformed in one click into a downloadable chargeback representation package. It maps grant, action, receipt chain, and verdict to compelling-evidence fields.',
+          "That saves the merchant from fighting blind or conceding by default. With grant vs action vs receipt in one pack, you can represent with proof when the order was authorized, or concede early and save the chargeback fee when the evidence doesn't support it — instead of spending manual review time assembling evidence order by order.",
+        ],
+      },
+      {
+        id: 'listing-optimizer',
+        title: 'Listing optimizer',
+        short: 'Listing fixes from mismatch data and agentic-retrieval gaps, merchant-approved only.',
+        paras: [
+          'The listing optimizer reviews every listing and provides a summary of what\'s missing for an agent to view it — details, metadata, and terms in a form agents can parse, filter, and compare without friction. Listings without details and metadata are skipped by agents, even if a human shopper would see them.',
+          'Fixing those gaps does two things: it prevents mismatches like a page that says "Easy returns" while formal terms are Final Sale, or a total including expedited shipping that isn\'t shown before confirmation, and it helps agents find and understand more of your catalogue, so fewer listings are skipped and chances of conversion increase. These are recommendations only, and the merchant approves every fix — AgentReceipt never auto-edits a product page, price, or terms on its own.',
+        ],
+      },
     ],
-    demoTitle: 'Try the demo',
-    demoNote: 'A simulated store, shopper agent and merchant view. Made-up customers, no real payments.',
-    doors: [
-      { to: '/chat', title: 'Customer phone', note: 'Talk to Muse, the shopper agent.' },
-      { to: '/shop', title: 'Northwind store', note: 'The demo snowboard and ski store.' },
-      { to: '/dashboard', title: 'Merchant dashboard', note: 'The merchant view of agent orders.' },
-    ] as Door[],
+    ctaTitle: 'Want this on your store?',
+    ctaLabel: 'Reach out for pilot',
   },
 
   faq: {
@@ -122,32 +149,53 @@ export const content = {
       {
         q: 'Can agents make errors?',
         a: [
-          'Yes. Agents misread marketing summaries for formal terms, treat an item price as the total, or miss shipping and return terms.',
-          "Those errors become the merchant's chargebacks and returns — AgentReceipt catches them before fulfillment.",
+          { t: "Yes. Agents can make errors from misinterpreting the user's need to overstepping to misunderstanding marketing summaries and formal terms." },
+          { t: "Those errors become the merchant's chargebacks and returns — AgentReceipt catches them before fulfillment." },
         ],
       },
       {
-        // PLACEHOLDER answer
         q: 'How does AgentReceipt fit into my existing order flow?',
         a: [
-          'AgentReceipt checks an agent order at order received and returns a recommendation. Your order system holds or releases shipment and capture.',
-          'Integration details are coming soon.',
+          { t: 'It sits between agent order and fulfillment, as a checkpoint — it checks the order, returns a signal, and your system holds shipment on that signal.' },
+          { t: 'It does not replace your checkout, payment, or order system.' },
         ],
       },
       {
-        // PLACEHOLDER answer
-        q: 'What data do you store about my customers?',
+        q: 'How does it connect to my Shopify store?',
         a: [
-          'AgentReceipt stores the authorization fields, the order record and the receipt for each agent order. It does not receive the customer chat.',
-          'The full data policy is coming soon. The demo uses made-up customers only.',
+          { t: 'AgentReceipt does not replace your Shopify checkout, payment, or fulfillment — it checks orders after they are placed, before fulfillment, and returns a Ship / Hold signal to your dashboard.' },
         ],
       },
       {
-        // PLACEHOLDER answer
-        q: 'What are the products / features offered?',
-        a: ['Order check before fulfillment, a dispute evidence pack, and a listing optimizer. See the Products section above.'],
+        q: 'Does this change my checkout or slow fulfillment?',
+        a: [
+          { t: 'No checkout change for the customer — the check happens at order received, before fulfillment, not at payment.' },
+          { t: 'Fulfillment is only held on flagged orders you choose to review; Pass orders proceed as normal, with no extra step.' },
+        ],
       },
-    ],
+      {
+        q: 'Which agents does this work with?',
+        a: [
+          { t: 'We support all verified agents with shopping support capability.' },
+          { t: 'We are continuously evolving our list of covered agents.' },
+        ],
+      },
+      {
+        q: 'What data do you access, and is my customer data safe?',
+        a: [
+          { t: "We access only that purchase's grant fields, action record, and hash-sealed receipt — no full customer chat, no other orders' data, and Merchant A never sees Merchant B's orders." },
+          { t: "Your customer data is used only to check that order and to optimize that merchant's listings — it is not sold, shared with other merchants, or used to train other orders' checks." },
+        ],
+      },
+      {
+        q: 'What are the products / features offered?',
+        a: [
+          { t: 'Order check — catches mismatches before fulfillment.', to: '/products#order-check', toLabel: 'Details → Products page' },
+          { t: 'Evidence pack — downloadable evidence pack for a disputed shipped order.', to: '/products#evidence-pack', toLabel: 'Details → Products page' },
+          { t: 'Listing optimizer — listing fixes from mismatch data and agentic-retrieval gaps, merchant-approved only.', to: '/products#listing-optimizer', toLabel: 'Details → Products page' },
+        ],
+      },
+    ] as { q: string; a: FaqLine[] }[],
   },
 
   pilot: {
@@ -165,8 +213,7 @@ export const content = {
       interest: 'I want to',
       message: 'Message (optional)',
     },
-    // PLACEHOLDER options
-    interestOptions: ['Join a pilot', 'See a live walkthrough', 'Ask a question'],
+    interestOptions: ['Join a pilot', 'Stay in the loop'],
     submit: 'Submit',
     sending: 'Sending…',
     success: 'Thanks. We have your request and will be in touch.',
@@ -175,8 +222,12 @@ export const content = {
   },
 
   footer: {
-    // PLACEHOLDER
-    line: '© AgentReceipt. Demo build for the Meta Global AI Developer Hackathon.',
-    note: 'Demo only: simulated store and simulated payments. Verified-agent status shown in the demo is simulated. AgentReceipt shows mismatch facts only; it does not decide liability.',
+    line: 'AgentReceipt — Trust layer for agentic shopping.',
+    links: [
+      { label: 'LinkedIn', href: '#', external: true }, // PLACEHOLDER: add the LinkedIn address
+      { label: 'Dashboard', href: '/dashboard', external: false },
+      { label: 'Store', href: '/shop', external: false },
+    ],
+    note: 'Demo: simulated store and simulated payments. The verified-agent signal shown in the demo is simulated.',
   },
 }

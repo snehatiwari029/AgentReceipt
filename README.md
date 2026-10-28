@@ -83,7 +83,7 @@ Any static host works, as long as every path serves `index.html` (single-page-ap
 
 - **Words:** `src/site/content.ts`. Every heading, paragraph, button, FAQ answer and form label is a plain string in that one file. Lines marked `PLACEHOLDER` are stand-in text waiting for real wording.
 - **Look:** `src/site/site.css`. The variables at the top control every colour, font, page width and corner radius.
-- **Layout:** `src/site/LandingPage.tsx` (sections in order: hero, authorization gap, partner, Grant/Action/Verdict, Products, FAQ, Pilot form, footer).
+- **Layout:** `src/site/LandingPage.tsx` (home: hero, problem, what we do, how it works, products, FAQ, pilot form, footer) and `src/site/ProductsPage.tsx` (`/products`, exactly three products). Shared header/footer: `src/site/Chrome.tsx`.
 - **Pilot form:** saves one row to the Supabase table `pilot_requests` (migration `supabase/010_pilot_requests.sql`). Visitors can insert only; read entries in the Supabase Table Editor.
 - The store (`/shop`), phone chat (`/chat`) and dashboard (`/dashboard`) are separate and unchanged.
 

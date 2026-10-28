@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { content as c } from './content'
-import { Arrow, Fingerprint, Logo, iconFor } from './icons'
+import { Arrow, Fingerprint, iconFor } from './icons'
+import { SiteFooter, SiteHeader } from './Chrome'
 import PilotForm from './PilotForm'
 import './site.css'
+
+function Tag({ t }: { t: { merchant: string; outcome: string; tone: 'good' | 'bad' } }) {
+  return <div className={`tag ${t.tone}`}><small>{t.merchant}</small><b>{t.outcome}</b></div>
+}
 
 function Receipt() {
   const k = c.hero.card
@@ -13,6 +18,7 @@ function Receipt() {
   return (
     <div className="card-stage">
       <div className="card-ring" aria-hidden="true" />
+      {c.hero.tags.filter((t) => t.tone === 'bad').map((t) => <Tag key={t.merchant} t={t} />)}
       <div className="rcard" role="img" aria-label="Sample receipt: customer authorized $180 maximum, agent ordered $212.40 with expedited delivery, flagged Review required">
         <div className="rcard-top">
           <span className="rcard-order">{k.orderLabel} / {k.orderNumber}</span>
@@ -27,13 +33,14 @@ function Receipt() {
           <span className="rcard-seal"><Fingerprint size={26} /></span>
         </div>
       </div>
+      {c.hero.tags.filter((t) => t.tone === 'good').map((t) => <Tag key={t.merchant} t={t} />)}
       <span className="side-note">{k.sideNote}</span>
     </div>
   )
 }
 
 function Faq() {
-  const [open, setOpen] = useState<number | null>(0)
+  const [open, setOpen] = useState<number | null>(null) // all answers start collapsed
   return (
     <div className="acc">
       {c.faq.items.map((it, i) => {
@@ -45,7 +52,13 @@ function Faq() {
                 {it.q}<span className="acc-sign" aria-hidden="true">{isOpen ? '×' : '+'}</span>
               </button>
             </h3>
-            {isOpen && <div className="acc-a" id={`faq-${i}`}>{it.a.map((t) => <p key={t}>{t}</p>)}</div>}
+            {isOpen && (
+              <div className="acc-a" id={`faq-${i}`}>
+                {it.a.map((l) => (
+                  <p key={l.t}>{l.t}{l.to && <Link to={l.to}>[{l.toLabel ?? 'Details'}]</Link>}</p>
+                ))}
+              </div>
+            )}
           </div>
         )
       })}
@@ -56,23 +69,19 @@ function Faq() {
 // The public page. Words: content.ts. Look: site.css.
 export default function LandingPage() {
   const h = c.hero
+  // Arriving from another page with "/#faq": scroll once the sections exist.
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (id) document.getElementById(id)?.scrollIntoView()
+  }, [])
   return (
     <div className="site">
-      <header className="header">
-        <div className="header-in">
-          <a className="logo" href="#top" aria-label={`${c.brand} home`}><Logo />{c.brand}</a>
-          <nav className="nav" aria-label="Main">
-            {c.nav.links.map((l) => <a key={l.href} className="nav-link" href={l.href}>{l.label}</a>)}
-            <Link className="btn btn-sm" to={c.nav.loginTo}>{c.nav.loginLabel} <Arrow /></Link>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader onHome />
 
       <main id="top">
         <section className="hero">
           <div className="wrap hero-grid">
             <div>
-              <p className="eyebrow">{h.eyebrow}</p>
               <h1>{h.headlineBefore}<em>{h.headlineEmphasis}</em>{h.headlineAfter}</h1>
               <p className="hero-body">{h.body}</p>
               <div className="hero-cta">
@@ -84,26 +93,22 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="gap" aria-labelledby="gap-h">
+        <section className="gap" aria-labelledby="problem-h">
           <div className="wrap gap-grid">
             <div>
-              <p className="eyebrow">{c.gap.eyebrow}</p>
-              <h2 id="gap-h">{c.gap.headline}</h2>
-              <div className="gap-rule mono-foot">{c.gap.footLabel}</div>
+              <p className="eyebrow">{c.problem.eyebrow}</p>
+              <h2 id="problem-h">{c.problem.headline}</h2>
             </div>
-            <div>
-              <p className="gap-body">{c.gap.body}</p>
-              <p className="gap-quote">{c.gap.pullQuote}</p>
-            </div>
+            <p className="gap-body">{c.problem.body}</p>
           </div>
         </section>
 
         <section className="partner" aria-labelledby="partner-h">
           <div className="wrap">
-            <p className="eyebrow">{c.partner.eyebrow}</p>
-            <h2 id="partner-h">{c.partner.headline}</h2>
+            <p className="eyebrow">{c.whatWeDo.eyebrow}</p>
+            <h2 id="partner-h">{c.whatWeDo.headline}</h2>
             <div className="cols">
-              {c.partner.columns.map((col) => (
+              {c.whatWeDo.cards.map((col) => (
                 <div className="col" key={col.tag}>
                   <p className="col-tag">{col.tag}</p>
                   <h3>{col.title}</h3>
@@ -122,39 +127,35 @@ export default function LandingPage() {
                 {c.steps.headlineLines.map((l) => <span key={l} style={{ display: 'block' }}>{l}</span>)}
                 <em>{c.steps.headlineEmphasis}</em>
               </h2>
-              <p className="steps-body">{c.steps.body}</p>
             </div>
-            <div className="step-list">
-              {c.steps.items.map((s) => (
-                <div className="step" key={s.num}>
-                  <span className="step-num">{s.num}</span>
-                  <div><h3>{s.title}</h3><p>{s.body}</p></div>
-                  <span className="step-ico">{iconFor(s.icon)}</span>
-                </div>
-              ))}
+            <div>
+              <div className="step-list">
+                {c.steps.items.map((s) => (
+                  <div className="step" key={s.num}>
+                    <span className="step-num">{s.num}</span>
+                    <div><h3>{s.title}</h3><p>{s.body}</p></div>
+                    <span className="step-ico">{iconFor(s.icon)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="step-note">{c.steps.note}</p>
             </div>
           </div>
         </section>
 
-        <section className="products" id={c.products.id} aria-labelledby="products-h">
+        <section className="products" id={c.productsHome.id} aria-labelledby="products-h">
           <div className="wrap">
-            <p className="eyebrow">{c.products.eyebrow}</p>
-            <h2 id="products-h">{c.products.headline}</h2>
-            <p className="products-intro">{c.products.intro}</p>
+            <p className="eyebrow">{c.productsHome.eyebrow}</p>
+            <h2 id="products-h">{c.productsHome.headline}</h2>
             <div className="pcols">
               {c.products.items.map((p) => (
-                <div className="pcol" key={p.title}><h3>{p.title}</h3><p>{p.body}</p></div>
+                <div className="pcol" key={p.id}>
+                  <h3><Link to={`/products#${p.id}`}>{p.title}</Link></h3>
+                  <p>{p.short}</p>
+                </div>
               ))}
             </div>
-            <div className="demo-box">
-              <h3>{c.products.demoTitle}</h3>
-              <p className="demo-note">{c.products.demoNote}</p>
-              <div className="doors">
-                {c.products.doors.map((d) => (
-                  <Link className="door" key={d.to} to={d.to}><b>{d.title}</b><span>{d.note}</span></Link>
-                ))}
-              </div>
-            </div>
+            <Link className="more-link" to={c.productsHome.moreTo}>{c.productsHome.moreLabel} <Arrow /></Link>
           </div>
         </section>
 
@@ -182,9 +183,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="footer">
-        <div className="wrap"><p>{c.footer.line}</p><p>{c.footer.note}</p></div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

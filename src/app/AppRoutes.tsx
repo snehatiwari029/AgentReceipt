@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import LandingPage from '../site/LandingPage'
+import ProductsPage from '../site/ProductsPage'
 import ShopApp from '../shop/ShopApp'
 import DashboardApp from '../dashboard/DashboardApp'
 import ChatApp from '../chat/ChatApp'
@@ -9,6 +10,7 @@ export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/products" element={<ProductsPage />} />
       <Route path="/chat" element={<ChatApp />} />
       <Route path="/shop" element={<ShopApp />} />
       <Route path="/dashboard/*" element={<DashboardApp />} />

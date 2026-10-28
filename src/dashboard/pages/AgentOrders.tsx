@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Decision, Dispute, DisputeEvent, Grant, MismatchResult, Receipt } from '../../shared/schemas'
 import { formatMoney } from '../../shared/format'
 import { num, str, useRows, type Rows } from '../data'
@@ -128,6 +128,20 @@ export function withProductName(rows: MismatchResult[], snapshot: Record<string,
 export default function AgentOrders() {
   const state = useAgentOrders()
   const [open, setOpen] = useState<string | null>(null)
+  const [openRef, setOpenRef] = useState<string | null>(null)
+
+  // The guided tour asks for one order's check to be shown, by order number.
+  useEffect(() => {
+    const onOpen = (e: Event) => setOpenRef((e as CustomEvent<string>).detail)
+    window.addEventListener('agentreceipt:open-order', onOpen)
+    return () => window.removeEventListener('agentreceipt:open-order', onOpen)
+  }, [])
+  useEffect(() => {
+    if (!openRef || state.status !== 'ready') return
+    const row = state.rows.find((o) => o.order === openRef && o.receipt)
+    if (row) setOpen(row.key)
+    setOpenRef(null)
+  }, [openRef, state])
 
   return (
     <div>
@@ -169,7 +183,7 @@ export default function AgentOrders() {
                       const r = o.receipt
                       const isOpen = open === o.key
                       return (
-                        <tr key={o.key} className="border-b border-dash-edge align-top">
+                        <tr key={o.key} data-order-ref={o.order ?? undefined} data-chain-seq={r?.chain_seq} className="border-b border-dash-edge align-top">
                           <td className="py-2 pr-4 font-semibold text-dash-ink">{o.order ?? '–'}</td>
                           <td className="py-2 pr-4">{r?.receipt_ref ?? '–'}</td>
                           <td className="py-2 pr-4">{o.customer}</td>

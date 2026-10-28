@@ -14,6 +14,7 @@ export default function Login({ onSignIn }: { onSignIn: () => void }) {
         >
           Sign in as demo merchant
         </button>
+        <p className="mt-2 text-xs text-dash-label">Demo merchant — no real auth in hackathon build</p>
       </main>
     </div>
   )

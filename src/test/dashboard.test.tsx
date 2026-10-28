@@ -62,4 +62,37 @@ describe('Dashboard and routing', () => {
     at('/nowhere')
     expect(screen.getByRole('heading', { level: 1, name: /Trust layer for\s*agentic\s*shopping/ })).toBeInTheDocument()
   })
+
+  it('/dashboard/optimize opens the Optimization page', async () => {
+    const user = userEvent.setup()
+    at('/dashboard/optimize')
+    await user.click(screen.getByRole('button', { name: /sign in as demo merchant/i }))
+    expect(await screen.findByRole('heading', { name: 'Optimization' })).toBeInTheDocument()
+  })
+
+  it('a direct login shows a Start tour button and no tour offer', async () => {
+    const user = userEvent.setup()
+    at('/dashboard')
+    await user.click(screen.getByRole('button', { name: /sign in as demo merchant/i }))
+    expect(screen.getByRole('button', { name: 'Start tour' })).toBeInTheDocument()
+    expect(screen.queryByText('Order placed — now see what the merchant sees')).not.toBeInTheDocument()
+  })
+
+  it('after the phone flow the tour is offered once, and the tour has Back, Next, Skip and a step count', async () => {
+    const user = userEvent.setup()
+    sessionStorage.setItem('agentreceipt-demo-merchant', 'yes')
+    sessionStorage.setItem('agentreceipt-tour-offer', '/dashboard/optimize')
+    at('/dashboard')
+    expect(screen.getByRole('heading', { name: 'Order placed — now see what the merchant sees' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /take 2-minute guided tour/i }))
+    expect(sessionStorage.getItem('agentreceipt-tour-offer')).toBeNull()
+    expect(await screen.findByText('Step 1 of 7')).toBeInTheDocument()
+    for (const name of ['Back', 'Next', 'Skip']) expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Step 2 of 7')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(screen.getByText('Tour complete — explore on your own now.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close tour' }))
+    expect(await screen.findByRole('heading', { name: 'Optimization' })).toBeInTheDocument()
+  })
 })

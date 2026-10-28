@@ -1,0 +1,29 @@
+[
+ {
+  "shape": "Narrative Workflow",
+  "theme": "almanac",
+  "axes": "light/grotesk-sans/chromatic-teal",
+  "hero": "Settled",
+  "nav": "edge-aligned",
+  "footer": "colophon block",
+  "imagery": "the product built",
+  "photos": [],
+  "entry": "none",
+  "fingerprint": "Numbered by structure|Asymmetric spans|Hairline|Solid|None|None",
+  "sections": [
+   "Hero (order 12322 sheet)",
+   "Rows (the problem)",
+   "Steps (five stages)",
+   "Table (verdict, band)",
+   "Split + Rows (Prevent issues)",
+   "Rows (FAQ disclosures)",
+   "Form (pilot, band)",
+   "Footer"
+  ],
+  "signature": "order 12322 on the printed sheet: grant, action, verdict",
+  "waived": [],
+  "prompt": "AgentReceipt B2B site: merchant trust layer for agentic shopping",
+  "date": "2026-10-28",
+  "mode": "build"
+ }
+]

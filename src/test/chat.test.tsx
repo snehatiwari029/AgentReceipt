@@ -163,3 +163,4 @@ describe('/chat phone screen', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('MODEL_API_KEY not set in Supabase secrets'))
   })
 })
+

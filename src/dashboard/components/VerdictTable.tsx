@@ -12,7 +12,7 @@ export default function VerdictTable({ rows }: { rows: MismatchResult[] }) {
     <div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
-          <thead>
+          <thead data-tour="verdict-head">
             <tr className="border-b border-dash-edge text-xs uppercase tracking-wider text-dash-label">
               <th className="py-2 pr-4 font-semibold">Field</th>
               <th className="py-2 pr-4 font-semibold">Grant</th>
@@ -25,7 +25,7 @@ export default function VerdictTable({ rows }: { rows: MismatchResult[] }) {
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={`${r.field}-${i}`} className="border-b border-dash-edge align-top">
+              <tr key={`${r.field}-${i}`} data-field-key={r.key} className="border-b border-dash-edge align-top">
                 <th scope="row" className="py-2 pr-4 font-semibold text-dash-ink">
                   {r.field}
                 </th>

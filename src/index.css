@@ -48,3 +48,10 @@ body {
     scroll-behavior: auto;
   }
 }
+
+/* Dashboard guided tour: the element the current step points at. Outline only, so nothing moves. */
+.tour-highlight {
+  outline: 3px solid var(--color-dash-teal);
+  outline-offset: 4px;
+  border-radius: 6px;
+}

@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { Link, NavLink, Route, Routes } from 'react-router-dom'
+import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 import Login from './Login'
 import Home from './pages/Home'
 import AgentOrders from './pages/AgentOrders'
 import Disputes from './pages/Disputes'
 import Optimization from './pages/Optimization'
 import Tamper from './pages/Tamper'
-import { isSignedIn, signIn, signOut } from './session'
+import Tour, { TourOffer } from './Tour'
+import { clearTourOffer, isSignedIn, peekTourOffer, signIn, signOut } from './session'
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', end: true },
@@ -19,6 +20,10 @@ const NAV = [
 // The merchant dashboard. Dark theme only. It reaches the store through an internal route.
 export default function DashboardApp() {
   const [signedIn, setSignedIn] = useState(isSignedIn)
+  // Offered once, only after the B2B site's phone flow; a direct login gets the Start tour button instead.
+  const [offer, setOffer] = useState(peekTourOffer)
+  const [tour, setTour] = useState<{ fromPhone: boolean; landing: string } | null>(null)
+  const navigate = useNavigate()
 
   if (!signedIn) {
     return (
@@ -36,6 +41,14 @@ export default function DashboardApp() {
       <aside className="border-b border-dash-edge bg-dash-card p-4 md:min-h-screen md:w-56 md:border-b-0 md:border-r">
         <p className="text-lg font-bold text-dash-ink">AgentReceipt</p>
         <p className="text-xs text-dash-label">Northwind Outfitters</p>
+        <button
+          type="button"
+          onClick={() => setTour({ fromPhone: false, landing: '/dashboard' })}
+          disabled={tour !== null}
+          className="mt-3 rounded-md border border-dash-teal px-3 py-1.5 text-sm font-semibold text-dash-teal hover:bg-dash-card-raised disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Start tour
+        </button>
         <nav aria-label="Dashboard" className="mt-4 flex flex-wrap gap-1 md:flex-col">
           {NAV.map((item) => (
             <NavLink
@@ -75,10 +88,27 @@ export default function DashboardApp() {
           <Route path="orders" element={<AgentOrders />} />
           <Route path="disputes" element={<Disputes />} />
           <Route path="optimization" element={<Optimization />} />
+          <Route path="optimize" element={<Optimization />} />
           <Route path="tamper" element={<Tamper />} />
           <Route path="*" element={<Home />} />
         </Routes>
       </main>
+
+      {offer && (
+        <TourOffer
+          onTour={() => {
+            clearTourOffer()
+            setOffer(null)
+            setTour({ fromPhone: true, landing: offer })
+          }}
+          onExplore={() => {
+            clearTourOffer()
+            setOffer(null)
+            navigate(offer)
+          }}
+        />
+      )}
+      {tour && <Tour fromPhone={tour.fromPhone} landing={tour.landing} onDone={() => setTour(null)} />}
     </div>
   )
 }

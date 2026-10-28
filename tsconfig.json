@@ -31,10 +31,12 @@
     "supabase/functions/_shared",
     "supabase/functions/shopper-agent",
     "supabase/functions/auditor",
+    "supabase/functions/api",
     "vite.config.ts"
   ],
   "exclude": [
     "supabase/functions/shopper-agent/index.ts",
-    "supabase/functions/auditor/index.ts"
+    "supabase/functions/auditor/index.ts",
+    "supabase/functions/api/index.ts"
   ]
 }

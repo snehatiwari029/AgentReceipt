@@ -33,8 +33,9 @@ export default function Disputes() {
               {rows.map((d) => {
                 const receipt = receipts.status === 'ready' ? receipts.rows.find((r) => r.id === d.receipt_id) : undefined
                 const evs = events.status === 'ready' ? events.rows.filter((e) => e.dispute_id === d.id) : []
-                                return (
-                  <Card key={d.id} label={`Dispute ${receipt?.receipt_ref ?? d.id}`}>
+                return (
+                  <div key={d.id} data-dispute-order={receipt?.order_ref ?? undefined}>
+                  <Card label={`Dispute ${receipt?.receipt_ref ?? d.id}`}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-lg font-bold text-dash-ink">{receipt?.receipt_ref ?? 'Receipt not found'}</p>
@@ -67,6 +68,7 @@ export default function Disputes() {
                       </ol>
                     )}
                   </Card>
+                  </div>
                 )
               })}
             </div>

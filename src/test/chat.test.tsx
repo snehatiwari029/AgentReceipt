@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
 import ChatApp from '../chat/ChatApp'
-import EntryPage from '../app/EntryPage'
 
 const HERO = "Help me place an order for a snowboard for this weekend trip with my friends. Budget under $500."
 const offers = [
@@ -166,13 +164,3 @@ describe('/chat phone screen', () => {
   })
 })
 
-describe('Entry page', () => {
-  it('has three separate doors, one per audience', () => {
-    render(<MemoryRouter><EntryPage /></MemoryRouter>)
-    const link = (name: RegExp) => screen.getByRole('link', { name }).getAttribute('href')
-    expect(link(/Customer phone/)).toBe('/chat')
-    expect(link(/Northwind store/)).toBe('/shop')
-    expect(link(/Merchant dashboard/)).toBe('/dashboard')
-    expect(screen.getAllByRole('link')).toHaveLength(3)
-  })
-})

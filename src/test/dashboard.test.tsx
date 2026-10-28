@@ -58,8 +58,8 @@ describe('Dashboard and routing', () => {
     for (const a of screen.getAllByRole('link')) expect(a.getAttribute('href')).toMatch(/^#/)
   })
 
-  it('unknown paths fall back to the entry page', () => {
+  it('unknown paths fall back to the public page', () => {
     at('/nowhere')
-    expect(screen.getByRole('heading', { name: 'AgentReceipt demo' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: /Trust layer for\s*agentic\s*shopping/ })).toBeInTheDocument()
   })
 })

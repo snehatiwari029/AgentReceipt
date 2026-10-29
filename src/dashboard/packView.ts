@@ -27,7 +27,7 @@ const esc = (v: unknown) =>
   String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 const RESULT: Record<string, string> = {
-  match: 'Match', mismatch: 'Mismatch', unspecified: 'Unspecified — no check', not_in_record: 'Not in AgentReceipt record', in_record: 'In record (merchant review)', missing: 'Record missing',
+  match: 'Match', mismatch: 'Mismatch', unspecified: 'Not specified by the customer — no check', not_in_record: 'Not in AgentReceipt record', in_record: 'In record (merchant review)', missing: 'Record missing',
 }
 
 // The printable pack: rendered only from the same object as the JSON, so the two cannot diverge.

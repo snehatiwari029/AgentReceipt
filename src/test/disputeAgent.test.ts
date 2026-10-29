@@ -86,7 +86,7 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
     expect(p.claim.condition_plain).toMatch(/did not authorise or take part in this card-absent/)
     // product scope is null in the seed: unspecified, no check — never "snowboard", never a match
     const scope = p.sections.find((s) => s.key === 'grant')!.items.find((i) => i.label === 'Product scope')!
-    expect(scope).toMatchObject({ status: 'unspecified', value: 'Unspecified — no product scope check' })
+    expect(scope).toMatchObject({ status: 'unspecified', value: 'Not specified by the customer — no product scope check' })
     expect(p.claim_vs_record.find((e) => e.element === 'Product')!.result).toBe('unspecified')
     expect(p.claim_vs_record.find((e) => e.element === 'Budget')).toMatchObject({ result: 'match', record: expect.stringContaining('$500.00 max') })
     // shipment record present; delivery proof, carrier, tracking listed as missing, not invented
@@ -190,7 +190,7 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
     const json = packExport(p, events)
     const html = packToHtml(p, events)
     expect(json.pack).toBe(p)
-    for (const v of [p.pack_hash, p.tamper_line, '$500.00 max', '$489.83', 'Free returns within 30 days', 'Unspecified — no product scope check', p.disclaimer]) {
+    for (const v of [p.pack_hash, p.tamper_line, '$500.00 max', '$489.83', 'Free returns within 30 days', 'Not specified by the customer — no product scope check', p.disclaimer]) {
       expect(html).toContain(v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'))
       expect(JSON.stringify(json)).toContain(JSON.stringify(v).slice(1, -1))
     }

@@ -210,11 +210,11 @@ function grantItems(g: Row | null, merchantName: string): Item[] {
   const budget = money(n(g.amount_max_cents) ?? n(g.budget_limit_cents))
   return [
     present('Budget (maximum total)', budget ? `${budget} max` : null, { obtain_from: 'Not in AgentReceipt record' }),
-    s(g.product_scope) ? present('Product scope', s(g.product_scope)) : unspecified('Product scope', 'Unspecified — no product scope check'),
-    lo !== null || hi !== null ? present('Size range', `${lo ?? '?'}–${hi ?? '?'} cm`) : unspecified('Size range', 'Unspecified — no size check'),
-    s(g.colour_preference) ? present('Colour', s(g.colour_preference)) : unspecified('Colour', 'Unspecified — no colour check'),
-    s(g.delivery_by) ? present('Delivery by', date(g.delivery_by)) : unspecified('Delivery by', 'Unspecified — no delivery check'),
-    ret === true ? present('Returnable required', 'Yes, returnable required') : ret === false ? present('Returnable required', 'Not required') : unspecified('Returnable required', 'Unspecified — no returns check'),
+    s(g.product_scope) ? present('Product scope', s(g.product_scope)) : unspecified('Product scope', 'Not specified by the customer — no product scope check'),
+    lo !== null || hi !== null ? present('Size range', `${lo ?? '?'}–${hi ?? '?'} cm`) : unspecified('Size range', 'Not specified by the customer — no size check'),
+    s(g.colour_preference) ? present('Colour', s(g.colour_preference)) : unspecified('Colour', 'Not specified by the customer — no colour check'),
+    s(g.delivery_by) ? present('Delivery by', date(g.delivery_by)) : unspecified('Delivery by', 'Not specified by the customer — no delivery check'),
+    ret === true ? present('Returnable required', 'Yes, returnable required') : ret === false ? present('Returnable required', 'Not required') : unspecified('Returnable required', 'Not specified by the customer — no returns check'),
     present('Payment method ref', s(g.payment_method_ref), { obtain_from: 'Not in AgentReceipt record' }),
     present('Merchant', merchantName),
     present('Grant expiry', when(g.expires_at), { obtain_from: 'Not in AgentReceipt record' }),
@@ -374,6 +374,12 @@ const CLAIM_ELEMENT: Record<string, string> = {
   validity: 'Agent acted after the authorisation expired',
   returns: 'Returns terms differ from what the customer was told',
 }
+// When the customer never specified a field, nothing was authorised or restricted for it: the claim side says so,
+// instead of describing an unauthorised purchase.
+const NEVER_SPECIFIED: Record<string, string> = {
+  budget: 'a budget', product: 'a product scope', size: 'a size range', colour: 'a colour', delivery: 'a delivery date',
+  merchant: 'a merchant', payment: 'a payment method', validity: 'an expiry', returns: 'a returns requirement',
+}
 const ELEMENTS: Record<ClaimType, string[]> = {
   agent_outside_grant: ['budget', 'product', 'size', 'colour', 'delivery', 'merchant', 'payment', 'validity'],
   not_authorised: ['merchant', 'payment', 'validity', 'budget'],
@@ -393,7 +399,17 @@ function claimVsRecord(claimType: ClaimType | null, receipt: Row, reviews: Row[]
       out.push({ element: k, claim, record: 'Not in AgentReceipt record', result: 'not_in_record' })
       continue
     }
-    const parts = [`Grant: ${r.grant ?? 'unspecified'}`]
+    if (r.result === 'unspecified') {
+      const what = NEVER_SPECIFIED[k] ?? r.field.toLowerCase()
+      out.push({
+        element: r.field,
+        claim: `Customer never specified ${what}, so no ${r.field.toLowerCase()} was authorised or restricted`,
+        record: `Grant: not specified by the customer · Actual: ${r.actual ?? `no ${r.field.toLowerCase()} recorded for this order`}`,
+        result: 'unspecified',
+      })
+      continue
+    }
+    const parts = [`Grant: ${r.grant ?? 'not specified by the customer'}`]
     if (r.merchant_terms) parts.push(`Merchant terms: ${r.merchant_terms}`)
     parts.push(`Actual: ${r.actual ?? 'not recorded'}`)
     const confirm = reviews.filter((v) => CONFIRMING.has(String(v.action_taken)))

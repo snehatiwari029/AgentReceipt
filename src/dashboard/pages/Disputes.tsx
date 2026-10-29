@@ -356,7 +356,7 @@ function RecordDispute({ merchant, onRecorded }: { merchant: Merchant; onRecorde
 const RESULT_TEXT: Record<string, { text: string; cls: string }> = {
   match: { text: '✓ Match', cls: 'text-dash-teal font-semibold' },
   mismatch: { text: '✕ Mismatch', cls: 'text-dash-violation font-bold' },
-  unspecified: { text: '– Unspecified, no check', cls: 'text-dash-label font-semibold' },
+  unspecified: { text: '– Not specified by the customer, no check', cls: 'text-dash-label font-semibold' },
   not_in_record: { text: '⚠ Not in AgentReceipt record', cls: 'text-dash-attention font-bold' },
   in_record: { text: 'In record (merchant review)', cls: 'text-dash-ink font-semibold' },
 }

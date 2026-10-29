@@ -171,7 +171,12 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(within(cvr).getByText('Agent overstep — agent exceeded budget / bought outside grant')).toBeInTheDocument()
     expect(within(cvr).getByText(/The customer's description is not a network code/)).toBeInTheDocument()
     expect(cvr.querySelector('[data-element="Budget"]')).toHaveTextContent(/Grant: \$500\.00 max.*Actual: \$489\.83 total.*✓ Match/)
-    expect(cvr.querySelector('[data-element="Product"]')).toHaveTextContent('– Unspecified, no check')
+    expect(cvr.querySelector('[data-element="Product"]')).toHaveTextContent('– Not specified by the customer, no check')
+    // never specified is not the same as not authorised
+    const colour = cvr.querySelector('[data-element="Colour"]')!
+    expect(colour).toHaveTextContent('Customer never specified a colour, so no colour was authorised or restricted')
+    expect(colour).toHaveTextContent('Grant: not specified by the customer · Actual: no colour recorded for this order')
+    expect(colour).not.toHaveTextContent(/not authorised|Agent bought a colour/)
     const tl = within(detail).getByTestId('timeline').textContent ?? ''
     for (const s of ['Grant sealed', 'Action', 'Verdict', 'No merchant review record', 'Shipped 2026-10-27 · delivered 2026-10-29 · delivery proof missing', 'Dispute filed', 'Evidence pack generated', 'Fought (submitted to acquirer)', 'Date 2026-11-01', 'Won', 'Date 2026-11-02']) expect(tl).toContain(s)
     expect(tl.indexOf('Shipped')).toBeLessThan(tl.indexOf('Dispute filed'))

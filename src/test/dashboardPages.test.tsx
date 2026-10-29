@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NINE } from './fixtures'
 import { fakeClient, mock, type Result } from './mockSupabase'
 import { buildSeed } from '../../scripts/seed-dashboard-demo'
@@ -9,7 +9,9 @@ import { buildSeed } from '../../scripts/seed-dashboard-demo'
 vi.mock('../shared/supabase', () => ({ supabase: fakeClient }))
 
 import AppRoutes from '../app/AppRoutes'
-import { causeCounts, contradictingProducts } from '../dashboard/pages/Optimization'
+import { causeCounts, fieldCounts } from '../dashboard/pages/Optimization'
+import { runScan } from '../../supabase/functions/optimizer/run'
+import { BURTON, NW, world } from './optimizerFixtures'
 import type { Receipt } from '../shared/schemas'
 
 // Test only: the rows the seed script generates are served by the fake database,
@@ -161,13 +163,121 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
   })
 })
 
-describe('Optimization', () => {
-  it('flags a product page that mentions returns while the terms say final sale, from live products', async () => {
-    mock.tables = { products: { data: NINE, error: null } }
+describe('Optimization for Agents', () => {
+  const NORTHWIND = { data: [{ id: NW, name: 'Northwind Outfitters' }], error: null }
+  // A real scan, run by the optimizer's own code over the test copy of the 9 Northwind rows, served as table rows.
+  async function scanned() {
+    const w = world()
+    await runScan({ merchant_id: NW }, w.deps)
+    mock.tables = {
+      merchants: NORTHWIND,
+      optimizer_scans: { data: w.tables.optimizer_scans, error: null },
+      optimizer_suggestions: { data: w.tables.optimizer_suggestions, error: null },
+      receipts: SEEDED.receipts,
+    }
+    return w
+  }
+  let calls: { url: string; body: Record<string, unknown> }[] = []
+  beforeEach(() => {
+    calls = []
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.test')
+    vi.stubEnv('VITE_SUPABASE_PUBLISHABLE_KEY', 'sb_publishable_test')
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      calls.push({ url, body })
+      const reply = body.action === 'approve_all' ? { type: 'approve_all', approved: 1, skipped_unfilled: 2, skipped_not_pending: 0 }
+        : body.action === 'decide' ? { type: 'decision', suggestion_id: body.suggestion_id, status: 'approved' }
+          : { type: 'scan', scan_id: 's', listings_scanned: 9, flags: 1, resolved: 0, still_flagged: 0, markup_status: 'fetched', spark: {} }
+      return new Response(JSON.stringify(reply))
+    }))
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('before any scan shows Scan Now and an empty state, not seeded checklist text', async () => {
+    mock.tables = { merchants: NORTHWIND }
     open('/dashboard/optimization')
-    expect(await screen.findByText(/Burton Spellbinder/)).toBeInTheDocument()
-    expect(screen.getByText('Easy returns.')).toBeInTheDocument()
-    expect(contradictingProducts(NINE)).toHaveLength(1)
+    expect(await screen.findByRole('heading', { name: 'Optimization for Agents' })).toBeInTheDocument()
+    expect(await screen.findByText('No scan yet.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Scan Now' })).toBeInTheDocument()
+    expect(screen.queryByTestId('optimizer-listing')).not.toBeInTheDocument()
+  })
+
+  it('Scan Now calls the optimizer function with this merchant only', async () => {
+    const user = userEvent.setup()
+    mock.tables = { merchants: NORTHWIND }
+    open('/dashboard/optimization')
+    await user.click(await screen.findByRole('button', { name: 'Scan Now' }))
+    expect(calls).toEqual([{ url: 'https://project.test/functions/v1/optimizer', body: { action: 'scan', merchant_id: NW } }])
+    expect(await screen.findByText(/Scan finished: 9 listings/)).toBeInTheDocument()
+  })
+
+  it('shows the scan: header, summary, 9 listing rows, and the Spellbinder worked example open with its Order check link', async () => {
+    await scanned()
+    open('/dashboard/optimization')
+    expect(await screen.findAllByTestId('optimizer-listing')).toHaveLength(9)
+    const header = screen.getByRole('region', { name: 'Optimizer header' })
+    expect(header).toHaveTextContent('Northwind Outfitters')
+    expect(within(header).getByRole('link', { name: 'View Store' })).toHaveAttribute('href', '/shop')
+    expect(screen.getByText('Listings scanned').nextSibling).toHaveTextContent('9')
+    expect(screen.getByText('Top priority').nextSibling).toHaveTextContent('Contradictions first — Returns')
+    expect(screen.getAllByText('Pillar 2: Contradiction — Marketing "Easy returns." vs formal terms "Final Sale"')).toHaveLength(1)
+    expect(screen.getByText(/3 orders on this listing had mismatches — 12322, 15001, 15002/)).toHaveTextContent('Budget mismatches: 3 · Returns mismatches: 3')
+    expect(screen.getAllByRole('button', { name: 'Hide checklist' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Show checklist and fixes' })).toHaveLength(8)
+    for (const c of fieldCounts(SEEDED.receipts.data as Receipt[])) {
+      expect(screen.getByText(`${c.field}`, { selector: 'span' }).parentElement).toHaveTextContent(`${c.field} mismatches: ${c.count}`)
+    }
+  })
+
+  it('Approve All says it applies nothing, and sends only the pending suggestions shown', async () => {
+    const user = userEvent.setup()
+    const w = await scanned()
+    open('/dashboard/optimization')
+    await screen.findAllByTestId('optimizer-listing')
+    expect(screen.getByText(/It does not apply them: no listing, price, term or page\s+changes/)).toBeInTheDocument()
+    await user.click(screen.getByLabelText('Caused a real order mismatch'))
+    await user.click(screen.getByRole('button', { name: /^Approve All/ }))
+    const sent = calls[0].body.suggestion_ids as string[]
+    expect(calls[0].body.action).toBe('approve_all')
+    expect(new Set(sent)).toEqual(new Set(w.tables.optimizer_suggestions.filter((s) => s.caused_mismatch_count > 0).map((s) => s.id)))
+    expect(await screen.findByText(/2 left pending because a To-be-filled field is empty. Nothing in your store was changed./)).toBeInTheDocument()
+  })
+
+  it('a missing field has an empty To-be-filled input; Approve stays disabled until the merchant types a value', async () => {
+    const user = userEvent.setup()
+    const w = await scanned()
+    open('/dashboard/optimization')
+    const spell = (await screen.findAllByTestId('optimizer-listing'))[0]
+    const ids = within(spell).getAllByTestId('optimizer-suggestion').find((el) => el.textContent?.includes('Missing identifiers'))!
+    const gtin = within(ids).getByLabelText('To be filled by merchant: GTIN')
+    expect(gtin).toHaveValue('')
+    expect(within(ids).getByRole('button', { name: 'Approve' })).toBeDisabled()
+    await user.type(gtin, '0123')
+    await user.type(within(ids).getByLabelText('To be filled by merchant: MPN'), 'M1')
+    await user.type(within(ids).getByLabelText('To be filled by merchant: SKU'), 'S1')
+    await user.click(within(ids).getByRole('button', { name: 'Approve' }))
+    const id = w.find(BURTON, 'p1.identifiers').id
+    expect(calls).toHaveLength(1)
+    expect(calls[0].body).toMatchObject({ action: 'decide', suggestion_id: id, decision: 'approve', values: { GTIN: '0123', MPN: 'M1', SKU: 'S1' } })
+  })
+
+  it('filters by pillar, flag type and "caused a real order mismatch"', async () => {
+    const user = userEvent.setup()
+    await scanned()
+    open('/dashboard/optimization')
+    await screen.findAllByTestId('optimizer-listing')
+    await user.selectOptions(screen.getByLabelText('Flag type'), 'contradiction')
+    expect(screen.getAllByTestId('optimizer-listing')).toHaveLength(1)
+    await user.selectOptions(screen.getByLabelText('Flag type'), 'all')
+    await user.selectOptions(screen.getByLabelText('Pillar'), '1')
+    expect(screen.getAllByTestId('optimizer-listing')).toHaveLength(9)
+    await user.click(screen.getByLabelText('Caused a real order mismatch'))
+    expect(screen.getByText('No listings match these filters.')).toBeInTheDocument() // feed / identifier flags caused no mismatch
+    await user.selectOptions(screen.getByLabelText('Pillar'), 'all')
+    expect(screen.getAllByTestId('optimizer-listing')).toHaveLength(1)
   })
 
   it('counts mismatch causes only for mismatches', () => {
@@ -176,5 +286,6 @@ describe('Optimization', () => {
       { field: 'Colour', result: 'unspecified', cause: null },
     ] } as unknown as Receipt
     expect(causeCounts([r, r])).toEqual([{ field: 'Budget', cause: 'Cap read as item-only', count: 2 }])
+    expect(fieldCounts([r, r])).toEqual([{ field: 'Budget', count: 2 }])
   })
 })

@@ -35,7 +35,7 @@ describe('Dashboard and routing', () => {
     expect(await screen.findByText(/products in the store/)).toHaveTextContent('products in the store')
     const nav = screen.getByRole('navigation', { name: 'Dashboard' })
     expect(nav).toHaveTextContent('Dashboard')
-    for (const label of ['Agent orders', 'Disputes', 'Optimization', 'Tamper']) {
+    for (const label of ['Agent orders', 'Disputes', 'Optimization for Agents', 'Tamper']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
   })
@@ -63,11 +63,11 @@ describe('Dashboard and routing', () => {
     expect(screen.getByRole('heading', { level: 1, name: /Trust layer for\s*agentic\s*shopping/ })).toBeInTheDocument()
   })
 
-  it('/dashboard/optimize opens the Optimization page', async () => {
+  it('/dashboard/optimize opens the Optimization for Agents page', async () => {
     const user = userEvent.setup()
     at('/dashboard/optimize')
     await user.click(screen.getByRole('button', { name: /sign in as demo merchant/i }))
-    expect(await screen.findByRole('heading', { name: 'Optimization' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Optimization for Agents' })).toBeInTheDocument()
   })
 
   it('a direct login shows a Start tour button and no tour offer', async () => {
@@ -93,6 +93,6 @@ describe('Dashboard and routing', () => {
     await user.click(screen.getByRole('button', { name: 'Skip' }))
     expect(screen.getByText('Tour complete — explore on your own now.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Close tour' }))
-    expect(await screen.findByRole('heading', { name: 'Optimization' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Optimization for Agents' })).toBeInTheDocument()
   })
 })

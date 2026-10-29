@@ -13,7 +13,7 @@ const NAV = [
   { to: '/dashboard', label: 'Dashboard', end: true },
   { to: '/dashboard/orders', label: 'Agent orders', end: false },
   { to: '/dashboard/disputes', label: 'Disputes', end: false },
-  { to: '/dashboard/optimization', label: 'Optimization', end: false },
+  { to: '/dashboard/optimization', label: 'Optimization for Agents', end: false },
   { to: '/dashboard/tamper', label: 'Tamper', end: false },
 ]
 

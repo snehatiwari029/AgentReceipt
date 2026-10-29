@@ -7,7 +7,8 @@ export type Rows<T> =
   | { status: 'ready'; rows: T[] }
 
 // Reads a whole table or view from Supabase, live. No fallback data: an empty table is shown as empty.
-export function useRows<T>(table: string, orderBy: string, ascending: boolean): Rows<T> {
+// Changing `reload` reads the table again (used after the Optimization page writes through its edge function).
+export function useRows<T>(table: string, orderBy: string, ascending: boolean, reload = 0): Rows<T> {
   const [state, setState] = useState<Rows<T>>({ status: 'loading' })
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export function useRows<T>(table: string, orderBy: string, ascending: boolean): 
     return () => {
       cancelled = true
     }
-  }, [table, orderBy, ascending])
+  }, [table, orderBy, ascending, reload])
 
   return state
 }

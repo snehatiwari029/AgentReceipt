@@ -385,7 +385,11 @@ function SuggestionCard({ s, merchantId, onChanged }: { s: Suggestion; merchantI
         Status: {STATUS_LABEL[s.status]}
         {s.decided_at && s.status !== 'pending' && <span className="font-normal text-dash-label"> · {s.decided_by}, {new Date(s.decided_at).toLocaleString()}</span>}
       </p>
-      {s.rescan_result && <p className="mt-1 text-sm text-dash-body">Re-scan: {s.rescan_result}</p>}
+      {/* A re-scan note is shown only if that re-scan ran after the merchant's latest decision; an older note would read
+          as a verdict on the decision when no scan has run since. */}
+      {s.rescan_result && s.rescan_at && (!s.decided_at || Date.parse(s.rescan_at) >= Date.parse(s.decided_at)) && (
+        <p className="mt-1 text-sm text-dash-body">Re-scan ({new Date(s.rescan_at).toLocaleString()}): {s.rescan_result}</p>
+      )}
       {error && <p role="alert" className="mt-2 text-sm text-dash-violation">{error}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {editable && (

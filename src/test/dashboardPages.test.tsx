@@ -302,6 +302,19 @@ describe('Optimization for Agents', () => {
     expect(new Set(calls[0].body.suggestion_ids as string[])).toEqual(new Set(readyMissing.map((s) => s.id)))
   })
 
+  it('shows a re-scan note only when that re-scan ran after the latest decision, with its time', async () => {
+    const w = await scanned()
+    const returns = w.find(BURTON, 'p2.returns') // approved at 20:40, after the 20:35 re-scan: the note is stale
+    Object.assign(returns, { status: 'approved', decided_by: 'Northwind Outfitters (demo merchant sign-in)', decided_at: '2026-10-29T03:40:46.951+00:00', rescan_result: 'Still present on re-scan.', rescan_at: '2026-10-29T03:35:53.16+00:00' })
+    const markup = w.find(BURTON, 'p3.markup') // approved, then re-scanned: the note is current
+    Object.assign(markup, { status: 'still_flagged', decided_by: 'Northwind Outfitters (demo merchant sign-in)', decided_at: '2026-10-29T03:40:00+00:00', rescan_result: 'Still flagged on re-scan: the deterministic check still fails.', rescan_at: '2026-10-29T03:45:00+00:00' })
+    open('/dashboard/optimization')
+    const cards = within((await screen.findAllByTestId('optimizer-listing'))[0]).getAllByTestId('optimizer-suggestion')
+    const card = (t: string) => cards.find((el) => el.textContent?.includes(t))!
+    expect(card('vs formal terms').textContent).not.toContain('Re-scan')
+    expect(card('No Schema.org Product').textContent).toContain(`Re-scan (${new Date('2026-10-29T03:45:00+00:00').toLocaleString()}): Still flagged on re-scan`)
+  })
+
   it('filters by pillar and flag type only', async () => {
     const user = userEvent.setup()
     await scanned()

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ChainRecord } from '../shared/chain'
 import { supabase } from '../shared/supabase'
 
 export type Rows<T> =
@@ -49,4 +50,40 @@ export function str(v: unknown): string | null {
 }
 export function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+// One disputed order's chain records only, read by id: its grant, proposal, actions and receipt (the receipt row is
+// passed in, as already read). For a chain entry just before one of them that belongs to another order, only that
+// entry's hash is read, from the chain_entries view; never its contents.
+export async function loadOrderChain(receipt: Record<string, unknown> & { chain_seq: number; prev_hash: string; entry_hash: string }): Promise<{
+  records: ChainRecord[]
+  hashAt: (chainSeq: number) => string | null
+}> {
+  if (!supabase) throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.')
+  const db = supabase
+  type Raw = Record<string, unknown> & { chain_seq: number; prev_hash: string; entry_hash: string }
+  const rows = async (table: string, column: string, value: unknown): Promise<Raw[]> => {
+    if (typeof value !== 'string') return []
+    const { data, error } = await db.from(table).select('*').eq(column, value)
+    if (error) throw new Error(error.message)
+    return (data ?? []) as Raw[]
+  }
+  const [grants, proposals, actions] = await Promise.all([
+    rows('grants', 'id', receipt.grant_id), rows('proposals', 'id', receipt.proposal_id), rows('actions', 'grant_id', receipt.grant_id),
+  ])
+  const records: ChainRecord[] = [
+    ...grants.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'grant' as const, row })),
+    ...proposals.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'proposal' as const, row })),
+    ...actions.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'action' as const, row })),
+    { chain_seq: receipt.chain_seq, entry_type: 'receipt', row: receipt },
+  ]
+  const own = new Set(records.map((r) => r.chain_seq))
+  const before = [...own].map((s) => s - 1).filter((s) => s >= 1 && !own.has(s))
+  const hashes = new Map<number, string>()
+  if (before.length) {
+    const { data, error } = await db.from('chain_entries').select('chain_seq,entry_hash').in('chain_seq', before)
+    if (error) throw new Error(error.message)
+    for (const h of (data ?? []) as { chain_seq: number; entry_hash: string }[]) hashes.set(h.chain_seq, h.entry_hash)
+  }
+  return { records, hashAt: (s) => hashes.get(s) ?? null }
 }

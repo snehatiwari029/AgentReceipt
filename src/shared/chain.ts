@@ -77,3 +77,52 @@ export async function verifyChain(records: ChainRecord[]): Promise<ChainCheck> {
 
   return { ok: problems.length === 0, checked: sorted.length, entries, problems }
 }
+
+export type OrderChainCheck = {
+  ok: boolean
+  checked: number
+  receipt_hash: string | null
+  // The first problem found, with the stored and recomputed hashes, so the failing link can be shown as it is.
+  failed: (ChainProblem & { entry_type: ChainEntryType | null; stored_hash: string | null; recomputed_hash: string | null }) | null
+  problems: ChainProblem[]
+}
+
+// Tamper check for ONE order, used inside the dispute evidence (there is no Tamper page and no tamper endpoint).
+// Input: that order's chain records only (grant, proposal, action(s), receipt). Each record's hash is recomputed from
+// its own fields and must equal its stored entry_hash; each record's prev_hash must equal the stored hash of the entry
+// just before it. When that entry belongs to another order, only its hash is used (`hashAt`, read from the
+// chain_entries view), never its contents. Deterministic code only: no model decides pass or fail.
+export async function verifyOrderChain(
+  records: ChainRecord[],
+  hashAt: (chainSeq: number) => string | null | undefined,
+): Promise<OrderChainCheck> {
+  const sorted = [...records].sort((a, b) => a.chain_seq - b.chain_seq)
+  const problems: OrderChainCheck['problems'] = []
+  let failed: OrderChainCheck['failed'] = null
+  const fail = (p: ChainProblem, entryType: ChainEntryType | null, stored: string | null, recomputed: string | null) => {
+    problems.push(p)
+    failed ??= { ...p, entry_type: entryType, stored_hash: stored, recomputed_hash: recomputed }
+  }
+
+  const receipts = sorted.filter((r) => r.entry_type === 'receipt')
+  if (receipts.length !== 1) {
+    fail({ chain_seq: receipts[0]?.chain_seq ?? 0, kind: 'missing_entry', message: receipts.length ? 'More than one receipt for this order.' : 'This order has no receipt record.' }, 'receipt', null, null)
+  }
+
+  for (let i = 0; i < sorted.length; i++) {
+    const rec = sorted[i]
+    const before = i > 0 && sorted[i - 1].chain_seq === rec.chain_seq - 1 ? sorted[i - 1].row.entry_hash : null
+    const expectedPrev = rec.chain_seq <= 1 ? GENESIS_HASH : before ?? hashAt(rec.chain_seq - 1) ?? null
+    const recomputed = await computeEntryHash(rec.row.prev_hash, rec.row)
+    if (expectedPrev === null) {
+      fail({ chain_seq: rec.chain_seq, kind: 'missing_entry', message: `Entry ${rec.chain_seq - 1}, before entry ${rec.chain_seq} (${rec.entry_type}), is missing from the chain.` }, rec.entry_type, rec.row.entry_hash, recomputed)
+    } else if (rec.row.prev_hash !== expectedPrev) {
+      fail({ chain_seq: rec.chain_seq, kind: 'broken_link', message: `Entry ${rec.chain_seq} (${rec.entry_type}) does not point at the stored hash of entry ${rec.chain_seq - 1}.` }, rec.entry_type, rec.row.entry_hash, recomputed)
+    }
+    if (recomputed !== rec.row.entry_hash) {
+      fail({ chain_seq: rec.chain_seq, kind: 'content_changed', message: `Entry ${rec.chain_seq} (${rec.entry_type}) no longer matches its hash. Its contents were changed after it was written.` }, rec.entry_type, rec.row.entry_hash, recomputed)
+    }
+  }
+
+  return { ok: problems.length === 0, checked: sorted.length, receipt_hash: receipts.length === 1 ? receipts[0].row.entry_hash : null, failed, problems }
+}

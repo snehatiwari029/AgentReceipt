@@ -17,12 +17,21 @@ export const fakeClient = {
       mock.inserted.push({ table, row })
       return { data: null, error: null }
     },
-    select: () => ({
-      order: () => ({
-        then: (ok: (r: Result) => void) => {
-          if (!mock.hang) ok(mock.tables[table] ?? mock.next)
-        },
-      }),
-    }),
+    select: () => query(table, []),
   }),
+}
+
+// select() supports order(), and eq() / in() filters applied to the table's rows, as the real client does.
+type Filter = (row: Record<string, unknown>) => boolean
+function query(table: string, filters: Filter[]) {
+  return {
+    order: () => query(table, filters),
+    eq: (col: string, val: unknown) => query(table, [...filters, (r) => r[col] === val]),
+    in: (col: string, vals: unknown[]) => query(table, [...filters, (r) => vals.includes(r[col])]),
+    then: (ok: (r: Result) => void) => {
+      if (mock.hang) return
+      const res = mock.tables[table] ?? mock.next
+      ok(filters.length && Array.isArray(res.data) ? { ...res, data: (res.data as Record<string, unknown>[]).filter((r) => filters.every((f) => f(r))) } : res)
+    },
+  }
 }

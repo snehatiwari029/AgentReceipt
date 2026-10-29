@@ -13,7 +13,7 @@ One React app, one deployment. The routes are:
 | `/` | Demo entry page: three separate buttons (Customer phone, Northwind store, Merchant dashboard). | light |
 | `/chat` | Customer phone: a centred phone frame where the shopper talks to Muse. Calls only the `shopper-agent` function. | light, neutral |
 | `/shop` | Northwind Outfitters demo store, as a shopper or an agent sees it. 9 products read live from Supabase. | light retail |
-| `/dashboard` | AgentReceipt merchant dashboard. Demo sign-in, then Dashboard, Agent orders, Disputes, Optimization for Agents, Tamper. | dark |
+| `/dashboard` | AgentReceipt merchant dashboard. Demo sign-in, then Dashboard, Agent orders, Disputes, Optimization for Agents. | dark |
 
 ## Folders (`src/`)
 
@@ -33,11 +33,11 @@ Rules, enforced by tests (`src/test/separation.test.ts`):
 
 ## Status
 
-- Built: shop (9 products, photos from Supabase Storage), dashboard with demo sign-in and four pages that read Supabase live (Agent orders, Disputes, Optimization for Agents, Tamper), database schema.
+- Built: shop (9 products, photos from Supabase Storage), dashboard with demo sign-in and pages that read Supabase live (Agent orders, Disputes, Optimization for Agents), database schema.
 - The dashboard pages show empty states until receipts exist. They fill in on their own once rows are written, with no code change.
 - Built: shopper agent. Brain = Supabase edge function `shopper-agent` (Muse Spark, real tool-calling loop). Face = `/chat`.
 - Not built yet: receipt function that writes hash-chained rows, mismatch engine, evidence pack, detection beat.
-- The Tamper page checks the links between chain entries and simulates an edit on a copy in the browser. Recomputing each hash from its record comes with the receipt function.
+- Tamper check: there is no Tamper page. Each dispute on the Disputes page runs the tamper check on that order's own chain records (`verifyOrderChain` in `src/shared/chain.ts`). A verified chain shows one line, "Receipt chain verified — tamper check passed", with the receipt hash; a failed chain shows Investigate, never Represent.
 
 ## Supabase
 
@@ -135,7 +135,7 @@ Not done by Spark, ever: budget arithmetic ($449.95 + $60 = $509.95), SHA-256 ha
 
 ## Hash spec
 
-One file defines hashing for every chained record: `supabase/functions/_shared/hash.ts`. The edge functions, the Tamper page, the seed script and the tests all import it.
+One file defines hashing for every chained record: `supabase/functions/_shared/hash.ts`. The edge functions, the dispute tamper check, the seed script and the tests all import it.
 
 `entry_hash = sha256( prev_hash + "\n" + canonical JSON of the row )`, where the row leaves out `prev_hash`, `entry_hash`, `chain_seq` and `created_at`, object keys are sorted at every depth, and date-times are written in one fixed format. The first entry points at an all-zero origin hash. A grant's seal is its `entry_hash`.
 

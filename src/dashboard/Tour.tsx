@@ -50,17 +50,11 @@ const STEPS: Step[] = [
     body: 'Order 14522 came from an unverified agent: no session, no receipt. AgentReceipt records the gap and holds it for suspicion. There is no verdict table, because there is no record to check.',
     target: () => 'tr[data-order-ref="14522"]',
   },
-  {
-    route: '/dashboard/tamper',
-    title: 'Tamper',
-    body: 'The original $449.95 record verifies. Edit a copy to $44.99 and run the check: the hash no longer matches, and the failure shows here.',
-    target: () => 'section[aria-label="Tamper demo"]',
-  },
 ]
 
 const FALLBACK_HERO = '12322'
 
-// Seven steps across the dashboard pages. Never auto-advances; Back, Next and Skip on every step. It only
+// Six steps across the dashboard pages. Never auto-advances; Back, Next and Skip on every step. It only
 // highlights: the page underneath stays fully clickable, and nothing is left behind when it ends.
 export default function Tour({ fromPhone, landing, onDone }: { fromPhone: boolean; landing: string; onDone: () => void }) {
   const navigate = useNavigate()

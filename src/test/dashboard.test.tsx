@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,9 +35,11 @@ describe('Dashboard and routing', () => {
     expect(await screen.findByText(/products in the store/)).toHaveTextContent('products in the store')
     const nav = screen.getByRole('navigation', { name: 'Dashboard' })
     expect(nav).toHaveTextContent('Dashboard')
-    for (const label of ['Agent orders', 'Disputes', 'Optimization for Agents', 'Tamper']) {
+    for (const label of ['Dashboard', 'Agent orders', 'Disputes', 'Optimization for Agents']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Dashboard', 'Agent orders', 'Disputes', 'Optimization for Agents'])
+    expect(nav).not.toHaveTextContent(/tamper/i)
   })
 
   it('"View Store" is an internal link to /shop and opens the shop in the same app', async () => {
@@ -63,6 +65,15 @@ describe('Dashboard and routing', () => {
     expect(screen.getByRole('heading', { level: 1, name: /Trust layer for\s*agentic\s*shopping/ })).toBeInTheDocument()
   })
 
+  it('the old /dashboard/tamper URL renders no Tamper page: it falls back to the Dashboard home', async () => {
+    const user = userEvent.setup()
+    at('/dashboard/tamper')
+    await user.click(screen.getByRole('button', { name: /sign in as demo merchant/i }))
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.getByRole('main')).not.toHaveTextContent(/tamper/i)
+    expect(screen.queryByRole('button', { name: 'Verify chain' })).not.toBeInTheDocument()
+  })
+
   it('/dashboard/optimize opens the Optimization for Agents page', async () => {
     const user = userEvent.setup()
     at('/dashboard/optimize')
@@ -86,10 +97,10 @@ describe('Dashboard and routing', () => {
     expect(screen.getByRole('heading', { name: 'Order placed — now see what the merchant sees' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /take 2-minute guided tour/i }))
     expect(sessionStorage.getItem('agentreceipt-tour-offer')).toBeNull()
-    expect(await screen.findByText('Step 1 of 7')).toBeInTheDocument()
+    expect(await screen.findByText('Step 1 of 6')).toBeInTheDocument()
     for (const name of ['Back', 'Next', 'Skip']) expect(screen.getByRole('button', { name })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Step 2 of 7')).toBeInTheDocument()
+    expect(screen.getByText('Step 2 of 6')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Skip' }))
     expect(screen.getByText('Tour complete — explore on your own now.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Close tour' }))

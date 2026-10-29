@@ -22,6 +22,8 @@ beforeAll(async () => {
   SEEDED = {
     sessions: by('sessions'), grants: by('grants'), proposals: by('proposals'), actions: by('actions'),
     receipts: by('receipts'), disputes: by('disputes'), dispute_events: by('dispute_events'), products: { data: NINE, error: null },
+    // The chain view: hashes only.
+    chain_entries: { data: records.filter((r) => r.entry_type).map((r) => ({ chain_seq: r.row.chain_seq, entry_hash: r.row.entry_hash })), error: null },
   }
 })
 
@@ -44,7 +46,6 @@ describe('Dashboard pages: empty and error states', () => {
   it.each([
     ['/dashboard/orders', /no agent orders yet/i],
     ['/dashboard/disputes', /no disputes yet/i],
-    ['/dashboard/tamper', /the chain is empty/i],
   ])('%s shows a proper empty state, not fake rows or a placeholder', async (path, text) => {
     open(path)
     expect(await screen.findByText(text)).toBeInTheDocument()
@@ -144,21 +145,37 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(screen.getAllByText('– Not specified').length).toBeGreaterThan(0)
   })
 
-  it('Tamper: the original verifies, and the tampered copy of AR-2026-0041 ($449.95 to $44.99) visibly fails', async () => {
-    const user = userEvent.setup()
-    open('/dashboard/tamper')
-    await user.click(await screen.findByRole('button', { name: 'Verify chain' }))
-    expect(await screen.findByText(/original verified: 16 entries/i)).toBeInTheDocument()
+  it('Disputes: 13422 shows "Receipt chain verified — tamper check passed" with its receipt hash, computed by the verify function', async () => {
+    mock.tables = SEEDED
+    open('/dashboard/disputes')
+    const card = (await screen.findByText('AR-2026-0043')).closest('[data-dispute-order]') as HTMLElement
+    const hash = (SEEDED.receipts.data as Receipt[]).find((r) => r.order_ref === '13422')!.entry_hash
+    expect(await within(card).findByText(/Receipt chain verified — tamper check passed/)).toHaveTextContent(hash)
+    expect(within(card).getByText('Represent')).toBeInTheDocument()
+    expect(within(card).queryByText('Investigate')).not.toBeInTheDocument()
+  })
 
-    expect(screen.getByRole('option', { name: 'AR-2026-0041', selected: true })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Tamper with the amount' }))
-    expect(await screen.findByText(/tampered copy fails verification/i)).toBeInTheDocument()
-    expect(screen.getByText(/AR-2026-0041: \$449\.95/)).toHaveTextContent('$44.99')
-    expect(screen.getByText(/no longer matches its hash/i)).toBeInTheDocument()
-    expect(within(screen.getByRole('table')).getByText('✕ Content changed')).toBeInTheDocument()
+  it('Disputes: a receipt edited after it was written fails the check: investigate, never represent, no verified line', async () => {
+    const receipts = (SEEDED.receipts.data as Receipt[]).map((r) =>
+      r.order_ref === '13422' ? { ...r, action_summary: { ...r.action_summary, total_cents: 4898 } } : r)
+    mock.tables = { ...SEEDED, receipts: { data: receipts, error: null } }
+    open('/dashboard/disputes')
+    const card = (await screen.findByText('AR-2026-0043')).closest('[data-dispute-order]') as HTMLElement
+    expect(await within(card).findByText(/Receipt chain failed verification — tamper check failed. Recommendation: investigate, do not represent./)).toBeInTheDocument()
+    expect(within(card).getByText(/Entry \d+ \(receipt\) no longer matches its hash/)).toBeInTheDocument()
+    expect(within(card).getByText('Investigate')).toBeInTheDocument()
+    expect(within(card).queryByText('Represent')).not.toBeInTheDocument()
+    expect(within(card).queryByText(/tamper check passed/)).not.toBeInTheDocument()
+    expect(within(card).getByText(/\(record unverified\)/)).toBeInTheDocument()
+  })
 
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
-    expect(screen.getByText('No tampering yet.')).toBeInTheDocument()
+  it('Disputes: the recommendation is withheld while the chain is being checked', async () => {
+    mock.tables = SEEDED
+    open('/dashboard/disputes')
+    const card = (await screen.findByText('AR-2026-0043')).closest('[data-dispute-order]') as HTMLElement
+    expect(within(card).getByText(/Checking receipt chain… recommendation withheld/)).toBeInTheDocument()
+    expect(within(card).queryByText('Represent')).not.toBeInTheDocument()
+    await within(card).findByText(/tamper check passed/)
   })
 })
 

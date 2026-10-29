@@ -5,7 +5,6 @@ import Home from './pages/Home'
 import AgentOrders from './pages/AgentOrders'
 import Disputes from './pages/Disputes'
 import Optimization from './pages/Optimization'
-import Tamper from './pages/Tamper'
 import Tour, { TourOffer } from './Tour'
 import { clearTourOffer, isSignedIn, peekTourOffer, signIn, signOut } from './session'
 
@@ -14,7 +13,6 @@ const NAV = [
   { to: '/dashboard/orders', label: 'Agent orders', end: false },
   { to: '/dashboard/disputes', label: 'Disputes', end: false },
   { to: '/dashboard/optimization', label: 'Optimization for Agents', end: false },
-  { to: '/dashboard/tamper', label: 'Tamper', end: false },
 ]
 
 // The merchant dashboard. Dark theme only. It reaches the store through an internal route.
@@ -89,7 +87,6 @@ export default function DashboardApp() {
           <Route path="disputes" element={<Disputes />} />
           <Route path="optimization" element={<Optimization />} />
           <Route path="optimize" element={<Optimization />} />
-          <Route path="tamper" element={<Tamper />} />
           <Route path="*" element={<Home />} />
         </Routes>
       </main>

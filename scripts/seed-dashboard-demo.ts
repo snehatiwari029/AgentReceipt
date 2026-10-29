@@ -9,6 +9,8 @@ import { GENESIS_HASH, computeEntryHash, canonicalJson } from '../supabase/funct
 import { audit } from '../supabase/functions/_shared/audit'
 import { auditInputFromRecords } from '../supabase/functions/_shared/audit-input'
 import { parseExactDeliveryPhrase } from '../supabase/functions/auditor/spark'
+import { buildPack } from '../supabase/functions/disputes/pack'
+import { verifyOrderChain, type ChainRecord } from '../src/shared/chain'
 
 // Ids of this Supabase project's existing rows (read once from the database). The seed SQL checks
 // them before inserting and stops with a clear error if they differ.
@@ -26,7 +28,8 @@ export const TABLES: Record<string, Cols> = {
   proposals: [['id', 'uuid'], ['grant_id', 'uuid'], ['product_id', 'uuid'], ['shown_item_price_cents', 'int'], ['shown_total_cents', 'int'], ['shown_returns_summary', 'text'], ['shown_delivery', 'text'], ['shown_at', 'ts'], ['confirmation_ref', 'text'], ['confirmed_at', 'ts'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
   actions: [['id', 'uuid'], ['grant_id', 'uuid'], ['seq', 'int'], ['type', 'text'], ['detail', 'json'], ['agent_believed_terms', 'json'], ['image_evidence_ref', 'json'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
   receipts: [['id', 'uuid'], ['receipt_ref', 'text'], ['order_ref', 'text'], ['grant_id', 'uuid'], ['proposal_id', 'uuid'], ['merchant_id', 'uuid'], ['terms_snapshot', 'json'], ['action_summary', 'json'], ['mismatch_results', 'json'], ['problems_found', 'int'], ['recommendation', 'text'], ['missing_components', 'texts'], ['image_evidence_ref', 'json'], ['schema_label', 'text'], ['sealed_at', 'ts'], ['decision', 'text'], ['audit', 'json'], ['fulfillment', 'text'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
-  disputes: [['id', 'uuid'], ['receipt_id', 'uuid'], ['reason', 'text'], ['opened_at', 'ts'], ['created_at', 'ts']],
+  shipments: [['id', 'uuid'], ['receipt_id', 'uuid'], ['merchant_id', 'uuid'], ['shipped_on', 'date'], ['delivered_on', 'date'], ['carrier', 'text'], ['tracking_ref', 'text'], ['delivery_proof_ref', 'text'], ['source', 'text'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
+  disputes: [['id', 'uuid'], ['receipt_id', 'uuid'], ['merchant_id', 'uuid'], ['reason', 'text'], ['processor', 'text'], ['channel', 'text'], ['claim_type', 'text'], ['reason_code', 'text'], ['dispute_date', 'date'], ['dispute_amount_cents', 'int'], ['processor_reference', 'text'], ['opened_at', 'ts'], ['created_at', 'ts']],
   dispute_events: [['id', 'uuid'], ['dispute_id', 'uuid'], ['event_type', 'text'], ['decided_by', 'text'], ['basis', 'json'], ['created_at', 'ts'], ['chain_seq', 'int'], ['prev_hash', 'text'], ['entry_hash', 'text']],
 }
 
@@ -61,6 +64,7 @@ function plain(table: string, row: Row) {
 }
 
 const at = (hhmm: string) => `2026-10-26T${hhmm}:00.000Z`
+const on = (day: string, hhmm: string) => `2026-${day}T${hhmm}:00.000Z`
 
 type Scenario = {
   key: string
@@ -75,6 +79,7 @@ type Scenario = {
   terms: Row
   summary: Row
   fulfillment: 'proceed' | 'held' | 'shipped_override'
+  payment_detail: string // payment method detail recorded on the grant JSON, the action and the receipt
   recommendation: 'represent' | 'concede' | null // post-dispute only; null when no dispute exists
 }
 
@@ -97,7 +102,7 @@ async function build(s: Scenario) {
   }
   const grantRow = await chain('grants', 'grant', {
     id: gid, session_id: sid, version: 1, supersedes_grant_id: null, ...sealed,
-    private_chat_hash: chatHash(s.key), grant_json: JSON.parse(canonicalJson({ ...sealed, payment_method_detail: 'PayPal', payment_simulated: true })),
+    private_chat_hash: chatHash(s.key), grant_json: JSON.parse(canonicalJson({ ...sealed, payment_method_detail: s.payment_detail, payment_simulated: true })),
     system_metadata: {
       data_sharing_limits: 'grant fields only, this purchase only', checked: false, priority: 'P1',
       seeded_demo: true, private_chat_hash_note: 'Seeded demo row: no private chat exists, the hash is of a fixed label.',
@@ -161,6 +166,7 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     terms: burtonTerms,
     summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'standard', shipping_cents: 0, total_cents: 44995, delivery_date: '2026-10-31', payment_method: 'Demo Checkout — PayPal' },
     fulfillment: 'proceed',
+    payment_detail: 'PayPal',
     recommendation: 'represent',
   })
 
@@ -178,31 +184,75 @@ export async function buildSeed(): Promise<{ sql: string; records: SeedRecord[] 
     terms: burtonTerms,
     summary: { order_status: 'Confirmed', product_name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', item_price_cents: 44995, shipping_method: 'expedited', shipping_cents: 6000, total_cents: 50995, delivery_date: '2026-10-28', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Easy returns per product page' },
     fulfillment: 'held',
+    payment_detail: 'PayPal',
     recommendation: null,
   })
 
-  // 3) Scenario B order 13422: agent complies, 0 problems (Pass). A SEPARATE shipped order that the customer disputed;
-  //    the merchant represents and wins. This is the only dispute in the seed.
+  // 3) Scenario B order 13422: agent complies, 0 problems (Pass). A SEPARATE order that shipped, was delivered, and was
+  //    then disputed. Filed under Visa, condition 10.4, as filed by the processor. The merchant fought it and reported Won:
+  //    that is the merchant's decision and the merchant-reported outcome, not an AgentReceipt recommendation.
+  //    Seed correction approved Oct 29, 2026: shipment record added; dispute timeline after delivery; paid with a Visa card
+  //    through Demo Checkout (payment detail only; grant fields, action, verdict, total and product are unchanged).
+  const VISA = 'Visa card (simulated, via Demo Checkout)'
   const b = await build({
     key: '13422', order_ref: '13422', receipt_ref: 'AR-2026-0043', shopper: 'Ivan Dijkstra', agent: 'instinct-kk14680',
     at: { grant: '18:00', proposal: '18:04', action: '18:06', receipt: '18:07' },
     grant: { product_scope: null, colour: null, return_required: true, delivery_by: '2026-10-30' },
     proposal: { product: ORCA_ID, item: 48983, total: 48983, returns: 'Free returns', delivery: 'Thu Oct 29' },
     action: {
-      detail: { product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary: { returns: 'Free returns' } },
+      detail: { product_id: ORCA_ID, product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: VISA, payment_simulated: true, agent_summary: { returns: 'Free returns' } },
       believed: { returns: 'Free returns' },
     },
     terms: orcaTerms,
-    summary: { order_status: 'Confirmed', product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: 'PayPal', payment_simulated: true, agent_summary_returns: 'Free returns' },
+    summary: { order_status: 'Confirmed', product_name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, colour: null, item_price_cents: 48983, shipping_method: 'standard', shipping_cents: 0, total_cents: 48983, delivery_date: '2026-10-29', payment_method: 'Demo Checkout', payment_method_detail: VISA, payment_simulated: true, agent_summary_returns: 'Free returns' },
     fulfillment: 'proceed',
+    payment_detail: VISA,
     recommendation: 'represent',
   })
+  // Layer 1 shipment record: shipped Tue Oct 27, delivered Thu Oct 29. No carrier, tracking or delivery proof is in the
+  // record, so they stay null and the pack lists them as missing.
+  const shipment = await chain('shipments', 'shipment', {
+    id: uid('13422:shipment'), receipt_id: b.rid, merchant_id: MERCHANT_ID, shipped_on: '2026-10-27', delivered_on: '2026-10-29',
+    carrier: null, tracking_ref: null, delivery_proof_ref: null, source: 'Merchant order system (seeded demo record)', created_at: on('10-27', '15:00'),
+  })
+  // Layer 3, as filed. Amount, channel and processor reference were not given, so they stay null (obtain from acquirer).
   const d2 = uid('13422:dispute')
-  plain('disputes', { id: d2, receipt_id: b.rid, reason: 'Claimed agent overstep — agent exceeded budget / bought outside grant', opened_at: at('18:30'), created_at: at('18:30') })
-  await chain('dispute_events', 'dispute_event', { id: uid('13422:ev1'), dispute_id: d2, event_type: 'opened', decided_by: null, basis: {}, created_at: at('18:30') })
-  await chain('dispute_events', 'dispute_event', { id: uid('13422:ev2'), dispute_id: d2, event_type: 'recommendation', decided_by: 'AgentReceipt (automatic)', basis: { recommendation: 'represent', problems_found: 0 }, created_at: at('18:31') })
-  await chain('dispute_events', 'dispute_event', { id: uid('13422:ev3'), dispute_id: d2, event_type: 'represented', decided_by: 'Northwind Outfitters', basis: { receipt_ref: 'AR-2026-0043' }, created_at: at('18:40') })
-  await chain('dispute_events', 'dispute_event', { id: uid('13422:ev4'), dispute_id: d2, event_type: 'outcome_won', decided_by: 'Northwind Outfitters', basis: { receipt_ref: 'AR-2026-0043' }, created_at: at('18:50') })
+  const filed = {
+    processor: 'visa', channel: null, claim_type: 'agent_outside_grant', reason_code: '10.4 — Other Fraud, Card-Absent Environment',
+    dispute_date: '2026-10-30', dispute_amount_cents: null, processor_reference: null,
+  }
+  const claim = 'Agent overstep — agent exceeded budget / bought outside grant'
+  const disputeRow = { id: d2, receipt_id: b.rid, merchant_id: MERCHANT_ID, reason: claim, ...filed, opened_at: on('10-30', '16:00'), created_at: on('10-30', '16:00') }
+  plain('disputes', disputeRow)
+  await chain('dispute_events', 'dispute_event', {
+    id: uid('13422:ev1'), dispute_id: d2, event_type: 'opened', decided_by: 'Northwind Outfitters',
+    basis: { ...filed, claim, order_ref: '13422', entered_by: 'seeded demo dispute' }, created_at: on('10-30', '16:00'),
+  })
+  // The pack built automatically when the dispute arrived (Visa format, template texts: Spark does not run in the seed).
+  // Its hash comes from the same pack builder the dashboard runs, over this order's own records.
+  const own = records.filter((r) => r.entry_type && [b.gid, b.rid, d2].some((id) =>
+    r.row.id === id || r.row.grant_id === id || r.row.receipt_id === id || r.row.dispute_id === id || r.row.id === b.receipt.proposal_id))
+  const chainRecs: ChainRecord[] = own.map((r) => ({ chain_seq: r.row.chain_seq as number, entry_type: r.entry_type as ChainRecord['entry_type'], row: r.row as ChainRecord['row'] }))
+  const gate = await verifyOrderChain(chainRecs, (s) => records.find((r) => r.row.chain_seq === s)?.row.entry_hash as string | undefined)
+  if (!gate.ok || !gate.receipt_hash) throw new Error('Seed chain for 13422 does not verify.')
+  const row = (table: string, id: unknown) => records.find((r) => r.table === table && r.row.id === id)!.row
+  const pack = await buildPack({
+    processor: 'visa', merchant: { id: MERCHANT_ID, name: 'Northwind Outfitters' }, receipt: b.receipt,
+    grant: row('grants', b.gid), proposal: row('proposals', b.receipt.proposal_id), action: records.find((r) => r.table === 'actions' && r.row.grant_id === b.gid)!.row,
+    shipment, reviews: [], dispute: disputeRow, gate: { status: 'passed', receipt_hash: gate.receipt_hash }, texts: null, text_source: 'rules-fallback',
+  })
+  await chain('dispute_events', 'dispute_event', {
+    id: uid('13422:ev2'), dispute_id: d2, event_type: 'pack_generated', decided_by: 'AgentReceipt (pack builder)',
+    basis: { processor: 'visa', pack_hash: pack.pack_hash, text_source: 'rules-fallback', texts: null, generated_at: on('10-30', '16:01') }, created_at: on('10-30', '16:01'),
+  })
+  await chain('dispute_events', 'dispute_event', {
+    id: uid('13422:ev3'), dispute_id: d2, event_type: 'represented', decided_by: 'Northwind Outfitters',
+    basis: { date: '2026-11-01', reason: null, recorded_at: on('11-01', '15:00') }, created_at: on('11-01', '15:00'),
+  })
+  await chain('dispute_events', 'dispute_event', {
+    id: uid('13422:ev4'), dispute_id: d2, event_type: 'outcome_won', decided_by: 'Northwind Outfitters',
+    basis: { date: '2026-11-02', reason: null, recorded_at: on('11-02', '15:00') }, created_at: on('11-02', '15:00'),
+  })
 
   // 4) Order 14522: gap. No receipt, no grant. A session row records the gap.
   plain('sessions', {
@@ -241,7 +291,7 @@ function insert(table: string, row: Row): string {
 }
 
 function emitSql(): string {
-  const order = ['sessions', 'grants', 'proposals', 'actions', 'receipts', 'disputes', 'dispute_events']
+  const order = ['sessions', 'grants', 'proposals', 'actions', 'receipts', 'shipments', 'disputes', 'dispute_events']
   const body = order
     .flatMap((t) => records.filter((r) => r.table === t).map((r) => insert(t, r.row)))
     .join('\n\n')
@@ -250,13 +300,14 @@ function emitSql(): string {
 -- AgentReceipt dashboard demo seed. GENERATED FILE: do not edit by hand.
 -- Regenerate with: npm run seed:generate   (script: scripts/seed-dashboard-demo.ts)
 --
--- Run ONCE in Supabase > SQL Editor, after 001 to 006. It does not change the schema.
+-- Run ONCE in Supabase > SQL Editor, after 001 to 014. It does not change the schema.
 -- It stops with an error, and writes nothing, if the ids below do not match this project,
 -- if the seed was already applied, or if the chain already has entries.
 --
--- Rows: orders 12322 (AR-2026-0042, hero, Review Required, NO dispute), 13422 (AR-2026-0043, Scenario B,
--- merchant represents and wins), 14522 (gap, no receipt), and the tamper example receipt
--- AR-2026-0041 ($449.95). Customers are demo names only. Payment: Demo Checkout — PayPal (simulated).
+-- Rows: orders 12322 (AR-2026-0042, hero, Review Required, NO dispute), 13422 (AR-2026-0043, Scenario B, Pass,
+-- shipped Oct 27, delivered Oct 29, disputed Oct 30 under Visa 10.4, merchant fought it and reported Won Nov 2),
+-- 14522 (gap, no receipt), and the tamper example receipt AR-2026-0041 ($449.95). Customers are demo names only.
+-- Payment: Demo Checkout (simulated): PayPal for 0041 and 12322, a Visa card for 13422.
 -- Hashes: supabase/functions/_shared/hash.ts, chained from the origin hash. Seeded demo data:
 -- no real chat exists, so private_chat_hash is a hash of a fixed label.
 -- To re-seed: select demo_reset();  (this clears ALL sessions, grants, receipts and disputes)

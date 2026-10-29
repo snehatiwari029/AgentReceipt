@@ -41,7 +41,7 @@ const STEPS: Step[] = [
   {
     route: '/dashboard/disputes',
     title: 'Scenario B: a separate order',
-    body: 'Order 13422, Orca $489.83: 0 problems, Pass. Later disputed as “Claimed agent overstep”. The record disproved it, and the merchant represented and won. This is a separate order, not the hero order.',
+    body: 'Order 13422, Orca $489.83: 0 problems, Pass. Shipped, delivered, then disputed under Visa 10.4 as “agent overstep”. AgentReceipt built the evidence package from the record; the merchant fought it and reported Won. This is a separate order, not the hero order.',
     target: () => '[data-dispute-order="13422"]',
   },
   {

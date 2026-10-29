@@ -5,7 +5,7 @@ import { buildSeed } from '../../scripts/seed-dashboard-demo'
 import { verifyChain, type ChainRecord } from '../shared/chain'
 import { GENESIS_HASH, canonicalJson, computeEntryHash } from '../../supabase/functions/_shared/hash'
 
-const TYPES = { grants: 'grant', proposals: 'proposal', actions: 'action', receipts: 'receipt', dispute_events: 'dispute_event' } as const
+const TYPES = { grants: 'grant', proposals: 'proposal', actions: 'action', receipts: 'receipt', shipments: 'shipment', dispute_events: 'dispute_event' } as const
 
 async function chainOf() {
   const { records, sql } = await buildSeed()
@@ -36,10 +36,10 @@ describe('dashboard demo seed', () => {
     expect(readFileSync(join(__dirname, '..', '..', 'supabase', 'seed_dashboard_demo.sql'), 'utf8')).toBe(first.sql)
   })
 
-  it('writes a chain that verifies from the origin, with 16 chained entries in order', async () => {
+  it('writes a chain that verifies from the origin, with 17 chained entries in order', async () => {
     const { chain } = await chainOf()
-    expect(chain).toHaveLength(16)
-    expect(chain.map((c) => c.chain_seq)).toEqual(Array.from({ length: 16 }, (_, i) => i + 1))
+    expect(chain).toHaveLength(17)
+    expect(chain.map((c) => c.chain_seq)).toEqual(Array.from({ length: 17 }, (_, i) => i + 1))
     expect(chain[0].row.prev_hash).toBe(GENESIS_HASH)
     const check = await verifyChain(chain)
     expect(check.ok).toBe(true)
@@ -129,12 +129,20 @@ describe('dashboard demo seed', () => {
     expect(b.product_scope).toBeNull()
     for (const g of grants) {
       expect(g.payment_method_ref).toBe('Demo Checkout')
-      expect(g.grant_json).toMatchObject({ payment_method_detail: 'PayPal', payment_simulated: true })
+      // Approved seed correction: 13422 was paid with a Visa card through Demo Checkout; the others stay PayPal.
+      expect(g.grant_json).toMatchObject({ payment_method_detail: g.id === b.id ? 'Visa card (simulated, via Demo Checkout)' : 'PayPal', payment_simulated: true })
       expect(g.schema_label).toBe('VI-aligned demo representation')
       expect(g.return_policy_required === false).toBe(false)
       expect(Object.keys(g)).not.toEqual(expect.arrayContaining(['intent_verbatim']))
     }
-    expect(sql).not.toMatch(/mastercard|visa|••|\b\d{4} \d{4} \d{4}/i)
+    expect(sql).not.toMatch(/mastercard|••|\b\d{4} \d{4} \d{4}|last ?4/i)
+    // "Visa" appears only on order 13422's own records (payment detail, processor and condition as filed), never as a card number.
+    const r13422 = records.find((x) => x.table === 'receipts' && x.row.order_ref === '13422')!.row
+    const dispute = records.find((x) => x.table === 'disputes')!.row
+    const own = [b.id, r13422.id, dispute.id] as string[]
+    for (const r of records.filter((x) => /visa/i.test(JSON.stringify(x.row)))) {
+      expect(own.some((id) => r.row.id === id || Object.values(r.row).includes(id)), `${r.table} ${r.row.id} mentions Visa`).toBe(true)
+    }
     expect(sql).not.toMatch(/\bchat\b.*:.*"/i)
   })
 
@@ -144,7 +152,35 @@ describe('dashboard demo seed', () => {
     expect(sql).toMatch(/commit;\s*$/)
     expect(sql).toMatch(/Seed stopped/)
     expect(sql).not.toMatch(/\b(create|alter|drop)\s+(table|policy|function|index|trigger)\b/i)
-    expect(sql).toMatch(/setval\('chain_seq_gen', 16, true\)/)
+    expect(sql).toMatch(/setval\('chain_seq_gen', 17, true\)/)
     void TYPES
+  })
+
+  it('13422 re-seed (approved Oct 29, 2026): shipped Oct 27, delivered Oct 29, disputed Oct 30 under Visa 10.4, fought Nov 1, Won Nov 2', async () => {
+    const { records, chain } = await chainOf()
+    const receipt = records.find((r) => r.table === 'receipts' && r.row.order_ref === '13422')!.row
+    // unchanged: verdict, total, product, grant fields
+    expect(receipt).toMatchObject({ receipt_ref: 'AR-2026-0043', decision: 'pass', problems_found: 0 })
+    expect(receipt.action_summary).toMatchObject({ total_cents: 48983, product_name: 'T. Rice Orca Snowboard 2025/2026', payment_method: 'Demo Checkout', payment_method_detail: 'Visa card (simulated, via Demo Checkout)' })
+    const grant = records.find((r) => r.table === 'grants' && r.row.id === receipt.grant_id)!.row
+    expect(grant).toMatchObject({ product_scope: null, colour_preference: null, amount_max_cents: 50000, return_policy_required: true, payment_method_ref: 'Demo Checkout' })
+
+    const ship = records.find((r) => r.table === 'shipments')!.row
+    expect(ship).toMatchObject({ receipt_id: receipt.id, shipped_on: '2026-10-27', delivered_on: '2026-10-29', carrier: null, tracking_ref: null, delivery_proof_ref: null })
+    const d = records.find((r) => r.table === 'disputes')!.row
+    expect(d).toMatchObject({ receipt_id: receipt.id, processor: 'visa', reason_code: '10.4 — Other Fraud, Card-Absent Environment', dispute_date: '2026-10-30', claim_type: 'agent_outside_grant', dispute_amount_cents: null, processor_reference: null })
+    expect(d.reason).toBe('Agent overstep — agent exceeded budget / bought outside grant')
+
+    const evs = chain.filter((c) => c.entry_type === 'dispute_event').map((c) => c.row)
+    expect(evs.map((e) => [e.event_type, String(e.created_at).slice(0, 10)])).toEqual([
+      ['opened', '2026-10-30'], ['pack_generated', '2026-10-30'], ['represented', '2026-11-01'], ['outcome_won', '2026-11-02'],
+    ])
+    expect(evs.map((e) => e.event_type)).not.toContain('recommendation')
+    // chain order follows the real order of events: receipt, shipment, then the dispute
+    const seqOf = (pred: (c: ChainRecord) => boolean) => chain.find(pred)!.chain_seq
+    expect(seqOf((c) => c.entry_type === 'shipment')).toBe(receipt.chain_seq as number + 1)
+    expect(seqOf((c) => c.row.event_type === 'opened')).toBeGreaterThan(seqOf((c) => c.entry_type === 'shipment'))
+    // the old timeline (dispute on Oct 26, represented / won minutes later, before delivery) is gone
+    expect(JSON.stringify(evs)).not.toMatch(/2026-10-26T18:(3|4|5)/)
   })
 })

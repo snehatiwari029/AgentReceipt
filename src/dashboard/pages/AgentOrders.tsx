@@ -6,6 +6,7 @@ import { disputeStatus } from '../status'
 import { Card, Empty, Live, PageTitle } from '../components/Panel'
 import { DecisionBadge } from '../components/Badges'
 import VerdictTable from '../components/VerdictTable'
+import MerchantActions from '../components/MerchantActions'
 
 type Session = {
   id: string
@@ -246,6 +247,7 @@ export default function AgentOrders() {
                       <p className="mt-3 break-all text-xs text-dash-label">
                         {r.schema_label}. Verified-agent status is simulated. Entry hash {r.entry_hash}
                       </p>
+                      {(r.decision === 'review_required' || r.decision === 'hold_suspicion') && <MerchantActions receipt={r} />}
                     </div>
                   )
                 })}

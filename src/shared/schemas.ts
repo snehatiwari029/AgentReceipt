@@ -106,13 +106,54 @@ export type Receipt = ChainFields & {
   fulfillment: Fulfillment | null
 }
 
+// Layer 3, as filed by the processor. Fields not filed stay null (014_dispute_agent.sql). The reason code is stored as
+// filed: no code selects or corrects it.
 export type Dispute = {
   id: string
   receipt_id: string
-  reason: string
+  reason: string // the dispute claim as filed
   opened_at: string
+  merchant_id?: string | null
+  processor?: 'visa' | 'mastercard' | null
+  channel?: string | null
+  claim_type?: string | null
+  reason_code?: string | null
+  dispute_date?: string | null
+  dispute_amount_cents?: number | null
+  processor_reference?: string | null
 }
 
+// Layer 1 shipment / delivery record. Carrier, tracking and delivery proof stay null when not in the order system.
+export type Shipment = ChainFields & {
+  id: string
+  receipt_id: string
+  merchant_id: string
+  shipped_on: string
+  delivered_on: string | null
+  carrier: string | null
+  tracking_ref: string | null
+  delivery_proof_ref: string | null
+  source: string
+  created_at?: string
+}
+
+// Layer 2: what the merchant did after a Review Required / Hold for Suspicion flag. Appended, never edited.
+export type MerchantReview = ChainFields & {
+  id: string
+  receipt_id: string
+  merchant_id: string
+  action_taken: 'called_confirmed' | 'emailed_confirmed' | 'investigated_cleared' | 'override_documented' | 'kept_on_hold' | 'cancelled'
+  method: 'phone' | 'email' | 'chat' | 'in_person' | 'other'
+  notes: string
+  confirmed_total: string | null
+  confirmed_terms: string | null
+  release_decision: 'released' | 'not_released'
+  recorded_by: string
+  recorded_at: string
+}
+
+// Merchant tracking events. 'recommendation' exists only on rows written before the Dispute Agent build; nothing writes
+// it and no page shows it. 'represented' is the merchant's own "Fought (submitted to acquirer)".
 export type DisputeEventType =
   | 'opened'
   | 'recommendation'
@@ -121,6 +162,11 @@ export type DisputeEventType =
   | 'pack_generated'
   | 'outcome_won'
   | 'outcome_lost'
+  | 'pack_downloaded'
+  | 'investigating'
+  | 'outcome_pending'
+  | 'outcome_conceded'
+  | 'merchant_note'
 
 export type DisputeEvent = ChainFields & {
   id: string
@@ -128,4 +174,5 @@ export type DisputeEvent = ChainFields & {
   event_type: DisputeEventType
   decided_by: string | null
   basis: Record<string, unknown>
+  created_at?: string
 }

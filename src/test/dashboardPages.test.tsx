@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NINE } from './fixtures'
 import { fakeClient, mock, type Result } from './mockSupabase'
-import { buildSeed } from '../../scripts/seed-dashboard-demo'
+import { buildSeed, MERCHANT_ID } from '../../scripts/seed-dashboard-demo'
 
 vi.mock('../shared/supabase', () => ({ supabase: fakeClient }))
 
@@ -22,6 +22,7 @@ beforeAll(async () => {
   SEEDED = {
     sessions: by('sessions'), grants: by('grants'), proposals: by('proposals'), actions: by('actions'),
     receipts: by('receipts'), disputes: by('disputes'), dispute_events: by('dispute_events'), products: { data: NINE, error: null },
+    shipments: by('shipments'), merchant_reviews: { data: [], error: null }, merchants: { data: [{ id: MERCHANT_ID, name: 'Northwind Outfitters' }], error: null },
     // The chain view: hashes only.
     chain_entries: { data: records.filter((r) => r.entry_type).map((r) => ({ chain_seq: r.row.chain_seq, entry_hash: r.row.entry_hash })), error: null },
   }
@@ -38,6 +39,7 @@ const open = (path: string) => {
 
 beforeEach(() => {
   mock.hang = false
+  mock.hangOn = []
   mock.next = { data: [], error: null }
   mock.tables = {}
 })
@@ -135,47 +137,185 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(within(orca).getByText('$489.83')).toBeInTheDocument()
   })
 
-  it('Disputes shows only the separate Orca order 13422 (won, clean receipt); the Review Required hero is not a dispute', async () => {
+  it('Disputes lists shipped + disputed agent orders only: 13422 (Visa 10.4, Won); 12322, 14522, 15001-type Review / Hold orders do not appear', async () => {
     open('/dashboard/disputes')
-    expect(await screen.findByText('AR-2026-0043')).toBeInTheDocument()
+    const row = (await screen.findByText('AR-2026-0043')).closest('tr') as HTMLElement
     expect(screen.queryByText('AR-2026-0042')).not.toBeInTheDocument()
-    expect(screen.getAllByText('Won').length).toBeGreaterThan(0)
-    expect(screen.getByText(/Claimed agent overstep/)).toBeInTheDocument()
-    expect(screen.getByText('0 problems found')).toBeInTheDocument()
-    expect(screen.getAllByText('– Not specified').length).toBeGreaterThan(0)
+    expect(screen.queryByText('14522')).not.toBeInTheDocument()
+    expect(within(row).getByText('13422')).toBeInTheDocument()
+    expect(within(row).getByText('Shipped 2026-10-27')).toBeInTheDocument()
+    expect(within(row).getByText('Ordered 2026-10-26')).toBeInTheDocument()
+    expect(within(row).getByText('Claim: Agent overstep — agent exceeded budget / bought outside grant')).toBeInTheDocument()
+    expect(within(row).getByText('Visa 10.4 — Other Fraud, Card-Absent Environment')).toBeInTheDocument()
+    expect(within(row).getByTestId('pack-status')).toHaveTextContent('Outcome: Won')
+    expect(await within(row).findByText('→ Customer says the agent bought outside what they authorised.')).toBeInTheDocument()
+    expect(within(row).getByText(/did not authorise or take part in this card-absent/)).toBeInTheDocument()
+    expect(within(row).getByText('8 documents missing — see pack')).toBeInTheDocument()
+    expect(within(row).getByText('Merchant input required')).toBeInTheDocument()
+    expect(screen.getByTestId('disputes-disclaimer')).toHaveTextContent(/AgentReceipt does not submit this pack on your behalf, and does not decide liability/)
+    expect(screen.getByText(/Orders on\s+hold, Review Required, or Hold for Suspicion with no shipment do not appear here/)).toBeInTheDocument()
   })
 
-  it('Disputes: 13422 shows "Receipt chain verified — tamper check passed" with its receipt hash, computed by the verify function', async () => {
-    mock.tables = SEEDED
+  it('Dispute detail for 13422: claim vs record, timeline, pack in Visa order, tamper line with the receipt hash, missing items, merchant-reported Won', async () => {
+    const user = userEvent.setup()
     open('/dashboard/disputes')
-    const card = (await screen.findByText('AR-2026-0043')).closest('[data-dispute-order]') as HTMLElement
+    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    const detail = await screen.findByTestId('dispute-detail')
     const hash = (SEEDED.receipts.data as Receipt[]).find((r) => r.order_ref === '13422')!.entry_hash
-    expect(await within(card).findByText(/Receipt chain verified — tamper check passed/)).toHaveTextContent(hash)
-    expect(within(card).getByText('Represent')).toBeInTheDocument()
-    expect(within(card).queryByText('Investigate')).not.toBeInTheDocument()
+    expect(await within(detail).findByTestId('tamper-line')).toHaveTextContent(`Receipt chain verified — tamper check passed · ${hash}`)
+    // reading order: claim vs record, timeline, pack, missing information, decisions
+    const order = ['claim-vs-record', 'timeline', 'evidence-pack', 'needed', 'decisions'].map((id) => within(detail).getByTestId(id))
+    for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const cvr = within(detail).getByTestId('claim-vs-record')
+    expect(within(cvr).getByText('Agent overstep — agent exceeded budget / bought outside grant')).toBeInTheDocument()
+    expect(within(cvr).getByText(/The customer's description is not a network code/)).toBeInTheDocument()
+    expect(cvr.querySelector('[data-element="Budget"]')).toHaveTextContent(/Grant: \$500\.00 max.*Actual: \$489\.83 total.*✓ Match/)
+    expect(cvr.querySelector('[data-element="Product"]')).toHaveTextContent('– Unspecified, no check')
+    const tl = within(detail).getByTestId('timeline').textContent ?? ''
+    for (const s of ['Grant sealed', 'Action', 'Verdict', 'No merchant review record', 'Shipped 2026-10-27 · delivered 2026-10-29 · delivery proof missing', 'Dispute filed', 'Evidence pack generated', 'Fought (submitted to acquirer)', 'Date 2026-11-01', 'Won', 'Date 2026-11-02']) expect(tl).toContain(s)
+    expect(tl.indexOf('Shipped')).toBeLessThan(tl.indexOf('Dispute filed'))
+    expect(tl.indexOf('Dispute filed')).toBeLessThan(tl.indexOf('Fought'))
+    const packEl = within(detail).getByTestId('evidence-pack')
+    expect([...packEl.querySelectorAll('[data-pack-section]')].map((x) => x.getAttribute('data-pack-section'))).toEqual(['dispute', 'grant', 'action', 'terms', 'verdict', 'receipt', 'layer2', 'delivery'])
+    expect(within(packEl).getByTestId('text-source')).toHaveTextContent('rules-fallback — deterministic check only, Spark formatting unavailable')
+    expect(within(packEl).getByTestId('pack-record')).toHaveTextContent('Matches the pack generation record of 2026-10-30.')
+    expect(within(packEl).getByTestId('pack-notes')).toHaveTextContent('CE3.0 eligibility cannot be determined from AgentReceipt record — prior transactions / device data not in record, obtain from acquirer.')
+    expect(within(packEl).getByTestId('pack-notes')).toHaveTextContent('Deadline: confirm with acquirer — settlement date not in record.')
+    expect(within(detail).getByTestId('merchant-input-flag')).toHaveTextContent('Merchant input required: Carrier; Tracking reference; Proof of delivery.')
+    expect(within(detail).getByTestId('decision-history')).toHaveTextContent(/Fought \(submitted to acquirer\)2026-11-01.*\(merchant-reported\).*Won2026-11-02/)
   })
 
-  it('Disputes: a receipt edited after it was written fails the check: investigate, never represent, no verified line', async () => {
+  it('Disputes: changing the pack format rebuilds it in the Mastercard field order and checklist', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/disputes')
+    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    const detail = await screen.findByTestId('dispute-detail')
+    await within(detail).findByTestId('tamper-line')
+    await user.selectOptions(within(detail).getByLabelText('Pack format'), 'mastercard')
+    await within(detail).findByText('Chargeback details')
+    const packEl = within(detail).getByTestId('evidence-pack')
+    expect([...packEl.querySelectorAll('[data-pack-section]')].map((x) => x.getAttribute('data-pack-section'))).toEqual(['dispute', 'action', 'grant', 'terms', 'delivery', 'layer2', 'verdict', 'receipt', 'eligibility'])
+    expect(within(detail).getByText(/This dispute was filed under Visa\. The pack below is rebuilt in the Mastercard format/)).toBeInTheDocument()
+    expect(within(packEl).getByTestId('pack-record')).toHaveTextContent('No pack generation recorded for the Mastercard format yet.')
+    expect(within(packEl).getByTestId('pack-notes')).toHaveTextContent('Registration status not in record — confirm with acquirer.')
+  })
+
+  it('Disputes: an edited receipt fails the tamper check: untrusted record, failing link named, no passed line', async () => {
+    const user = userEvent.setup()
     const receipts = (SEEDED.receipts.data as Receipt[]).map((r) =>
       r.order_ref === '13422' ? { ...r, action_summary: { ...r.action_summary, total_cents: 4898 } } : r)
     mock.tables = { ...SEEDED, receipts: { data: receipts, error: null } }
     open('/dashboard/disputes')
-    const card = (await screen.findByText('AR-2026-0043')).closest('[data-dispute-order]') as HTMLElement
-    expect(await within(card).findByText(/Receipt chain failed verification — tamper check failed. Recommendation: investigate, do not represent./)).toBeInTheDocument()
-    expect(within(card).getByText(/Entry \d+ \(receipt\) no longer matches its hash/)).toBeInTheDocument()
-    expect(within(card).getByText('Investigate')).toBeInTheDocument()
-    expect(within(card).queryByText('Represent')).not.toBeInTheDocument()
-    expect(within(card).queryByText(/tamper check passed/)).not.toBeInTheDocument()
-    expect(within(card).getByText(/\(record unverified\)/)).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    const detail = await screen.findByTestId('dispute-detail')
+    expect(await within(detail).findByText('Receipt chain failed verification — tamper check failed. This record is untrusted.')).toBeInTheDocument()
+    expect(within(detail).getAllByText(/Entry \d+ \(receipt\) no longer matches its hash/).length).toBeGreaterThan(0)
+    expect(within(detail).getByTestId('tamper-line')).toHaveTextContent(/^Receipt chain failed verification/)
+    expect(within(detail).queryByText(/tamper check passed/)).not.toBeInTheDocument()
   })
 
-  it('Disputes: the recommendation is withheld while the chain is being checked', async () => {
-    mock.tables = SEEDED
+  it('Disputes: the evidence package is withheld while the chain is being checked', async () => {
+    const user = userEvent.setup()
+    mock.hangOn = ['chain_entries'] // the neighbouring-hash read never answers, so the check cannot finish
     open('/dashboard/disputes')
-    const card = (await screen.findByText('AR-2026-0043')).closest('[data-dispute-order]') as HTMLElement
-    expect(within(card).getByText(/Checking receipt chain… recommendation withheld/)).toBeInTheDocument()
-    expect(within(card).queryByText('Represent')).not.toBeInTheDocument()
-    await within(card).findByText(/tamper check passed/)
+    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    const detail = await screen.findByTestId('dispute-detail')
+    expect(within(detail).getByText(/Checking receipt chain… the evidence package is shown after the check/)).toBeInTheDocument()
+    expect(within(detail).queryByTestId('evidence-pack')).not.toBeInTheDocument()
+    expect(within(detail).queryByTestId('tamper-line')).not.toBeInTheDocument()
+  })
+
+  it('Disputes page and pack show no AgentReceipt recommendation, classifier, win probability or score; decision buttons are merchant actions', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/disputes')
+    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    const detail = await screen.findByTestId('dispute-detail')
+    await within(detail).findByTestId('tamper-line')
+    const text = screen.getByRole('main').textContent ?? ''
+    expect(text).not.toMatch(/recommend|win probability|likely to win|\bscore\b|represent\b|you should (fight|concede)|we suggest|investigate, do not represent/i)
+    for (const name of ['Mark as Fought (submitted to acquirer)', 'Mark as Conceded', 'Mark as Investigating', 'Mark outcome']) {
+      expect(within(detail).getByRole('button', { name })).toBeInTheDocument()
+    }
+    expect(within(detail).getByText(/You decide, with your acquirer, whether to fight or concede/)).toBeInTheDocument()
+  })
+
+  it('Disputes: Mark as Fought shows the pack summary again, then appends through the disputes function only', async () => {
+    const user = userEvent.setup()
+    const calls: Record<string, unknown>[] = []
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.test')
+    vi.stubEnv('VITE_SUPABASE_PUBLISHABLE_KEY', 'sb_publishable_test')
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, ...JSON.parse(String(init.body)) })
+      return new Response(JSON.stringify({ type: 'event_recorded', event: {} }))
+    }))
+    try {
+      open('/dashboard/disputes')
+      await user.click(await screen.findByRole('button', { name: 'View details' }))
+      const detail = await screen.findByTestId('dispute-detail')
+      await within(detail).findByTestId('tamper-line')
+      await user.click(within(detail).getByRole('button', { name: 'Mark as Fought (submitted to acquirer)' }))
+      const confirm = within(detail).getByTestId('decision-confirm')
+      expect(confirm).toHaveTextContent(/Pack summary, before you record this.*Visa format.*8 items missing from the record; 3 need your input/)
+      await user.type(within(confirm).getByLabelText('Decision date'), '2026-11-04')
+      await user.type(within(confirm).getByLabelText('Reason'), 'Submitted again by our team.')
+      await user.click(within(confirm).getByRole('button', { name: 'Confirm and record' }))
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({ url: 'https://project.test/functions/v1/disputes', action: 'record_event', event_type: 'represented', date: '2026-11-04', reason: 'Submitted again by our team.', merchant_id: MERCHANT_ID })
+      expect(mock.inserted).toEqual([]) // the browser never writes a table
+    } finally {
+      vi.unstubAllEnvs()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('Record a dispute: a non-agent order shows "Not an AgentReceipt order — no evidence package built." and nothing is built', async () => {
+    const user = userEvent.setup()
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.test')
+    vi.stubEnv('VITE_SUPABASE_PUBLISHABLE_KEY', 'sb_publishable_test')
+    const calls: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      calls.push(JSON.parse(String(init.body)))
+      return new Response(JSON.stringify({ type: 'not_agent_order', message: 'Not an AgentReceipt order — no evidence package built.', gap: false }))
+    }))
+    try {
+      open('/dashboard/disputes')
+      await user.click(await screen.findByRole('button', { name: 'Record a dispute' }))
+      await user.type(screen.getByLabelText('Order id'), 'TEST-NOT-AN-ORDER')
+      await user.type(screen.getByLabelText('Dispute claim as filed'), 'Customer says unauthorised')
+      await user.selectOptions(screen.getByLabelText('Claim type as filed'), 'not_authorised')
+      await user.type(screen.getByLabelText('Reason code / condition as filed'), '10.4')
+      await user.type(screen.getByLabelText('Dispute date'), '2026-11-03')
+      await user.click(screen.getByRole('button', { name: 'Record dispute' }))
+      expect(await screen.findByText('Not an AgentReceipt order — no evidence package built.')).toBeInTheDocument()
+      expect(calls).toEqual([expect.objectContaining({ action: 'record_dispute', order_ref: 'TEST-NOT-AN-ORDER', processor: 'visa', reason_code: '10.4', dispute_amount_cents: null })])
+      expect(screen.queryAllByTestId('dispute-detail')).toHaveLength(0)
+    } finally {
+      vi.unstubAllEnvs()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('Agent orders: a Review Required order offers "Record merchant action" (Layer 2); a Pass order does not', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/orders')
+    const hero = (await screen.findByText('12322')).closest('tr')!
+    await user.click(within(hero).getByRole('button', { name: /show check/i }))
+    const box = await screen.findByTestId('merchant-actions')
+    expect(await within(box).findByText('No merchant review record.')).toBeInTheDocument()
+    const form = within(box).getByRole('form', { name: 'Record merchant action' })
+    expect(within(form).getAllByRole('option').map((o) => o.textContent)).toEqual(expect.arrayContaining([
+      'Called customer and confirmed', 'Emailed customer and confirmed', 'Investigated and cleared', 'Overrode with documented reason', 'Kept on hold', 'Cancelled',
+      'Phone call', 'Email', 'Chat', 'In-person', 'Other', 'Released for shipment', 'Not released',
+    ]))
+    // confirmed total / terms appear only for a confirmation, and are never pre-filled
+    expect(within(form).queryByLabelText('Confirmed total')).not.toBeInTheDocument()
+    await user.selectOptions(within(form).getByLabelText('Action taken'), 'called_confirmed')
+    expect(within(form).getByLabelText('Confirmed total')).toHaveValue('')
+    expect(within(form).getByLabelText('Confirmed terms')).toHaveValue('')
+    await user.click(within(hero).getByRole('button', { name: /hide check/i }))
+    const b = screen.getByText('13422').closest('tr')!
+    await user.click(within(b).getByRole('button', { name: /show check/i }))
+    expect(screen.queryByTestId('merchant-actions')).not.toBeInTheDocument()
   })
 })
 

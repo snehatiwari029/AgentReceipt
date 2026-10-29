@@ -1,4 +1,4 @@
-import { DECISION_LABEL, type Decision, type MismatchResult, type Recommendation } from '../../shared/schemas'
+import { DECISION_LABEL, type Decision, type MismatchResult } from '../../shared/schemas'
 
 // Colour is never the only signal: every badge has text.
 // The pre-fulfillment decision. Only these three values exist.
@@ -10,16 +10,6 @@ export function DecisionBadge({ value }: { value: Decision | null }) {
     hold_suspicion: 'border-dash-violation text-dash-violation',
   }
   return <span className={`inline-block rounded border px-2 py-0.5 text-xs font-bold ${cls[value]}`}>{DECISION_LABEL[value]}</span>
-}
-
-export function RecommendationBadge({ value }: { value: Recommendation | null }) {
-  if (!value) return <span className="text-xs font-semibold text-dash-label">No dispute yet</span>
-  const map: Record<Recommendation, { text: string; cls: string }> = {
-    represent: { text: 'Represent', cls: 'border-dash-teal text-dash-teal' },
-    concede: { text: 'Concede', cls: 'border-dash-violation text-dash-violation' },
-  }
-  const m = map[value]
-  return <span className={`inline-block rounded border px-2 py-0.5 text-xs font-bold ${m.cls}`}>{m.text}</span>
 }
 
 export function MatchBadge({ value }: { value: MismatchResult['result'] }) {

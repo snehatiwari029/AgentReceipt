@@ -33,12 +33,14 @@
     "supabase/functions/auditor",
     "supabase/functions/api",
     "supabase/functions/optimizer",
+    "supabase/functions/disputes",
     "vite.config.ts"
   ],
   "exclude": [
     "supabase/functions/shopper-agent/index.ts",
     "supabase/functions/auditor/index.ts",
     "supabase/functions/api/index.ts",
-    "supabase/functions/optimizer/index.ts"
+    "supabase/functions/optimizer/index.ts",
+    "supabase/functions/disputes/index.ts"
   ]
 }

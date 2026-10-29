@@ -53,9 +53,13 @@ export function num(v: unknown): number | null {
 }
 
 // One disputed order's chain records only, read by id: its grant, proposal, actions and receipt (the receipt row is
-// passed in, as already read). For a chain entry just before one of them that belongs to another order, only that
-// entry's hash is read, from the chain_entries view; never its contents.
-export async function loadOrderChain(receipt: Record<string, unknown> & { chain_seq: number; prev_hash: string; entry_hash: string }): Promise<{
+// passed in, as already read), plus its shipment, merchant review records and the dispute's own events. For a chain
+// entry just before one of them that belongs to another order, only that entry's hash is read, from the chain_entries
+// view; never its contents.
+export async function loadOrderChain(
+  receipt: Record<string, unknown> & { chain_seq: number; prev_hash: string; entry_hash: string },
+  disputeId?: string,
+): Promise<{
   records: ChainRecord[]
   hashAt: (chainSeq: number) => string | null
 }> {
@@ -68,14 +72,19 @@ export async function loadOrderChain(receipt: Record<string, unknown> & { chain_
     if (error) throw new Error(error.message)
     return (data ?? []) as Raw[]
   }
-  const [grants, proposals, actions] = await Promise.all([
+  const [grants, proposals, actions, shipments, reviews, events] = await Promise.all([
     rows('grants', 'id', receipt.grant_id), rows('proposals', 'id', receipt.proposal_id), rows('actions', 'grant_id', receipt.grant_id),
+    disputeId ? rows('shipments', 'receipt_id', receipt.id) : [], disputeId ? rows('merchant_reviews', 'receipt_id', receipt.id) : [],
+    disputeId ? rows('dispute_events', 'dispute_id', disputeId) : [],
   ])
   const records: ChainRecord[] = [
     ...grants.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'grant' as const, row })),
     ...proposals.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'proposal' as const, row })),
     ...actions.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'action' as const, row })),
     { chain_seq: receipt.chain_seq, entry_type: 'receipt', row: receipt },
+    ...shipments.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'shipment' as const, row })),
+    ...reviews.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'merchant_review' as const, row })),
+    ...events.map((row) => ({ chain_seq: row.chain_seq, entry_type: 'dispute_event' as const, row })),
   ]
   const own = new Set(records.map((r) => r.chain_seq))
   const before = [...own].map((s) => s - 1).filter((s) => s >= 1 && !own.has(s))

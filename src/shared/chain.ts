@@ -1,6 +1,6 @@
 import { GENESIS_HASH, computeEntryHash } from '../../supabase/functions/_shared/hash'
 
-export type ChainEntryType = 'grant' | 'proposal' | 'action' | 'receipt' | 'dispute_event'
+export type ChainEntryType = 'grant' | 'proposal' | 'action' | 'receipt' | 'dispute_event' | 'shipment' | 'merchant_review'
 
 // One stored record with its chain fields, as read from its own table.
 export type ChainRecord = {
@@ -88,7 +88,8 @@ export type OrderChainCheck = {
 }
 
 // Tamper check for ONE order, used inside the dispute evidence (there is no Tamper page and no tamper endpoint).
-// Input: that order's chain records only (grant, proposal, action(s), receipt). Each record's hash is recomputed from
+// Input: that order's chain records only (grant, proposal, action(s), receipt, and, inside a dispute, its shipment,
+// merchant review and dispute event records). Each record's hash is recomputed from
 // its own fields and must equal its stored entry_hash; each record's prev_hash must equal the stored hash of the entry
 // just before it. When that entry belongs to another order, only its hash is used (`hashAt`, read from the
 // chain_entries view), never its contents. Deterministic code only: no model decides pass or fail.

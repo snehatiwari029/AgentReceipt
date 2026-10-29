@@ -59,7 +59,7 @@ ${p.claim.code_flag ? `<tr><th>Flag</th><td>${esc(p.claim.code_flag)}</td></tr>`
 <p>${esc(p.texts.explanation)}</p><p><i>${esc(p.text_label)}</i></p>
 <h2>Claim vs record</h2><table><tr><th>Element</th><td><b>What the claim concerns · Record · Result</b></td></tr>${p.claim_vs_record
     .map((e) => `<tr><th>${esc(e.element)}</th><td>${esc(e.claim)} · ${esc(e.record)} · <b>${esc(RESULT[e.result])}</b></td></tr>`).join('')}</table>
-${p.sections.map((s) => `<h2>${esc(s.title)}</h2>${s.items.length ? `<table>${items(s.items)}</table>` : ''}${s.verdict ? verdict(s.verdict) : ''}${s.footer ? `<p>${esc(s.footer)}</p>` : ''}${s.key === 'layer2' ? `<p>${esc(p.layer2_statement)}</p>` : ''}`).join('\n')}
+${p.sections.map((s) => `<h2>${esc(s.title)}</h2>${s.items.length ? `<table>${items(s.items)}</table>` : ''}${s.verdict ? verdict(s.verdict) : ''}${s.footer ? `<p>${esc(s.footer)}</p>` : ''}${s.key === 'merchant_review' ? `<p>${esc(p.merchant_review_statement)}</p>` : ''}`).join('\n')}
 <h2>Missing documents checklist</h2>${p.needs.length ? `<table><tr><th>Item</th><td><b>Why · Where to obtain it</b></td></tr>${p.needs
     .map((n) => `<tr><th>${esc(n.item)}${n.merchant_input ? ' (merchant input required)' : ''}</th><td>${esc(n.why)} · ${esc(n.obtain_from)}</td></tr>`).join('')}</table>` : '<p>No item missing for this format.</p>'}
 <h2>Rules and deadlines</h2><ul>${p.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>

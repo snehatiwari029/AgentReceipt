@@ -144,7 +144,7 @@ export type Pack = {
   }
   claim_vs_record: Element[]
   sections: Section[]
-  layer2_statement: string
+  merchant_review_statement: string
   needs: Need[]
   notes: string[] // remedy / deadline / rule lines, each grounded in the record or the guide
   tamper_line: string
@@ -422,7 +422,7 @@ type Ctx = {
   terms: Item[]
   receipt: Item[]
   verdict: VerdictRow[]
-  layer2: Item[]
+  merchantReview: Item[]
   claimItems: Item[]
 }
 
@@ -459,7 +459,7 @@ function visa(c: Ctx): { sections: Section[]; notes: string[] } {
     ] },
     { key: 'verdict', title: 'Order check — line-by-line verdict', items: [], verdict: c.verdict, footer: VERDICT_FOOTER },
     { key: 'receipt', title: 'Record integrity — hash-chained receipt', items: c.receipt },
-    { key: 'layer2', title: 'Merchant review record (Layer 2)', items: c.layer2 },
+    { key: 'merchant_review', title: 'Merchant review record', items: c.merchantReview },
     { key: 'delivery', title: is104 ? 'Proof of delivery / access' : 'Shipment and delivery', items: shipmentItems(c.input.shipment, 'Proof of delivery') },
   ]
   const notes = [
@@ -484,7 +484,7 @@ function mastercard(c: Ctx): { sections: Section[]; notes: string[] } {
     { key: 'grant', title: 'Cardholder participation — the grant the customer gave the agent', items: c.grant },
     { key: 'terms', title: 'Merchant terms at order time', items: c.terms },
     { key: 'delivery', title: 'Signed proof of delivery and shipment', items: shipmentItems(c.input.shipment, 'Signed proof of delivery') },
-    { key: 'layer2', title: 'Correspondence documenting cardholder participation (merchant review record)', items: c.layer2 },
+    { key: 'merchant_review', title: 'Correspondence documenting cardholder participation (merchant review record)', items: c.merchantReview },
     { key: 'verdict', title: 'Order check — line-by-line verdict', items: [], verdict: c.verdict, footer: VERDICT_FOOTER },
     { key: 'receipt', title: 'Record integrity — hash-chained receipt', items: c.receipt },
     { key: 'eligibility', title: 'Second presentment conditions', items: [
@@ -642,7 +642,7 @@ export async function buildPack(input: PackInput): Promise<Pack> {
     terms: termsItems(receipt),
     receipt: receiptItems(receipt, input.gate),
     verdict: verdictRows(receipt),
-    layer2: l2.items,
+    merchantReview: l2.items,
     claimItems: claimItems(input),
   }
   const t = processor === 'visa' ? visa(ctx) : mastercard(ctx)
@@ -672,7 +672,7 @@ export async function buildPack(input: PackInput): Promise<Pack> {
     claim,
     claim_vs_record: claimVsRecord(claimType, receipt, input.reviews),
     sections: t.sections,
-    layer2_statement: l2.statement,
+    merchant_review_statement: l2.statement,
     needs,
     notes: t.notes,
     tamper_line: tamperLine(input.gate),

@@ -78,7 +78,7 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
     const w = await world()
     const p = await packFor(w, '13422', 'visa')
     expect(p.processor_label).toBe('Visa')
-    expect(p.sections.map((s) => s.key)).toEqual(['dispute', 'grant', 'action', 'terms', 'verdict', 'receipt', 'layer2', 'delivery'])
+    expect(p.sections.map((s) => s.key)).toEqual(['dispute', 'grant', 'action', 'terms', 'verdict', 'receipt', 'merchant_review', 'delivery'])
     expect(p.claim).toMatchObject({
       as_filed: 'Agent overstep — agent exceeded budget / bought outside grant', claim_type: 'agent_outside_grant',
       condition_as_filed: '10.4 — Other Fraud, Card-Absent Environment', condition_name: 'Other Fraud — Card-Absent Environment', code_flag: null,
@@ -96,7 +96,7 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
     for (const label of ['Carrier', 'Tracking reference', 'Proof of delivery']) {
       expect(delivery.find((i) => i.label === label)).toMatchObject({ status: 'missing', value: null, obtain_from: 'Obtain from fulfilment system' })
     }
-    expect(p.layer2_statement).toMatch(/No merchant review record\. The order was Pass at Order check, so no review was flagged\./)
+    expect(p.merchant_review_statement).toMatch(/No merchant review record\. The order was Pass at Order check, so no review was flagged\./)
   })
 
   it('lists every missing item with where to obtain it, and flags merchant input; nothing is filled in', async () => {
@@ -157,7 +157,7 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
     const v = await packFor(w, '13422', 'visa')
     const m = await packFor(w, '13422', 'mastercard')
     expect(m.processor_label).toBe('Mastercard')
-    expect(m.sections.map((s) => s.key)).toEqual(['dispute', 'action', 'grant', 'terms', 'delivery', 'layer2', 'verdict', 'receipt', 'eligibility'])
+    expect(m.sections.map((s) => s.key)).toEqual(['dispute', 'action', 'grant', 'terms', 'delivery', 'merchant_review', 'verdict', 'receipt', 'eligibility'])
     expect(m.sections.map((s) => s.title)).not.toEqual(v.sections.map((s) => s.title))
     expect(m.needs.map((n) => n.item)).toEqual(expect.arrayContaining(['Authorisation code / initial authorisation date', 'Settlement Date (DE 15) / Central Site Business Date', 'Signed proof of delivery', 'Cardholder registration status (registered or guest checkout)']))
     expect(m.needs.map((n) => n.item)).not.toContain('Payment credential (last 4 / token only)')
@@ -195,6 +195,15 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
       expect(JSON.stringify(json)).toContain(JSON.stringify(v).slice(1, -1))
     }
     expect(json.merchant_reported.map((m) => [m.entry, m.date])).toEqual([['Fought (submitted to acquirer)', '2026-11-01'], ['Won', '2026-11-02']])
+  })
+
+  it('no build vocabulary ("Layer 1 / 2 / 3") in the printable view or the downloaded JSON, in either format', async () => {
+    const w = await world()
+    for (const proc of ['visa', 'mastercard'] as const) {
+      const p = await packFor(w, '13422', proc)
+      expect(packToHtml(p, w.tables.dispute_events as never)).not.toMatch(/layer/i)
+      expect(JSON.stringify(packExport(p, w.tables.dispute_events as never))).not.toMatch(/layer/i)
+    }
   })
 
   it('no recommendation, classifier, win probability or score anywhere in the pack or the printable view', async () => {
@@ -257,7 +266,7 @@ describe('Dispute Agent: Layer 2 merchant review record', () => {
     const w = await world()
     await w.call('record_dispute', { order_ref: '12322', processor: 'visa', claim: 'Misled about returns', claim_type: 'misrepresentation', reason_code: '13.5', dispute_date: '2026-11-03' })
     const p = await packFor(w, '12322', 'visa', { gate: { status: 'passed', receipt_hash: 'sha256:x' } })
-    expect(p.layer2_statement).toMatch(new RegExp(`^${NO_REVIEW} This order was Review Required at Order check and no merchant action was recorded at review time\\.`))
+    expect(p.merchant_review_statement).toMatch(new RegExp(`^${NO_REVIEW} This order was Review Required at Order check and no merchant action was recorded at review time\\.`))
     expect(w.tables.merchant_reviews).toEqual([])
     // held, no shipment, no release: the merchant must say whether it shipped
     expect(p.needs.find((n) => n.item === 'Confirmation that this order shipped')).toMatchObject({ merchant_input: true })
@@ -284,7 +293,7 @@ describe('Dispute Agent: Layer 2 merchant review record', () => {
 
     await w.call('record_dispute', { order_ref: '12322', processor: 'visa', claim: 'Misled', claim_type: 'misrepresentation', reason_code: '13.5', dispute_date: '2026-11-03' })
     const p = await packFor(w, '12322', 'visa', { gate: { status: 'passed', receipt_hash: 'sha256:x' } })
-    const l2 = p.sections.find((s) => s.key === 'layer2')!.items
+    const l2 = p.sections.find((s) => s.key === 'merchant_review')!.items
     expect(l2.find((i) => i.label === 'Action taken (1)')!.value).toBe('Called customer and confirmed')
     expect(l2.find((i) => i.label === 'Confirmed total (1)')).toMatchObject({ status: 'present', value: '$509.95 total' })
     expect(l2.find((i) => i.label === 'Confirmed terms (1)')).toMatchObject({ status: 'missing', value: null })

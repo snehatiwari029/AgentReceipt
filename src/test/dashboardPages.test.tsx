@@ -177,7 +177,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(tl.indexOf('Shipped')).toBeLessThan(tl.indexOf('Dispute filed'))
     expect(tl.indexOf('Dispute filed')).toBeLessThan(tl.indexOf('Fought'))
     const packEl = within(detail).getByTestId('evidence-pack')
-    expect([...packEl.querySelectorAll('[data-pack-section]')].map((x) => x.getAttribute('data-pack-section'))).toEqual(['dispute', 'grant', 'action', 'terms', 'verdict', 'receipt', 'layer2', 'delivery'])
+    expect([...packEl.querySelectorAll('[data-pack-section]')].map((x) => x.getAttribute('data-pack-section'))).toEqual(['dispute', 'grant', 'action', 'terms', 'verdict', 'receipt', 'merchant_review', 'delivery'])
     expect(within(packEl).getByTestId('text-source')).toHaveTextContent('rules-fallback — deterministic check only, Spark formatting unavailable')
     expect(within(packEl).getByTestId('pack-record')).toHaveTextContent('Matches the pack generation record of 2026-10-30.')
     expect(within(packEl).getByTestId('pack-notes')).toHaveTextContent('CE3.0 eligibility cannot be determined from AgentReceipt record — prior transactions / device data not in record, obtain from acquirer.')
@@ -195,7 +195,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     await user.selectOptions(within(detail).getByLabelText('Pack format'), 'mastercard')
     await within(detail).findByText('Chargeback details')
     const packEl = within(detail).getByTestId('evidence-pack')
-    expect([...packEl.querySelectorAll('[data-pack-section]')].map((x) => x.getAttribute('data-pack-section'))).toEqual(['dispute', 'action', 'grant', 'terms', 'delivery', 'layer2', 'verdict', 'receipt', 'eligibility'])
+    expect([...packEl.querySelectorAll('[data-pack-section]')].map((x) => x.getAttribute('data-pack-section'))).toEqual(['dispute', 'action', 'grant', 'terms', 'delivery', 'merchant_review', 'verdict', 'receipt', 'eligibility'])
     expect(within(detail).getByText(/This dispute was filed under Visa\. The pack below is rebuilt in the Mastercard format/)).toBeInTheDocument()
     expect(within(packEl).getByTestId('pack-record')).toHaveTextContent(/It is not yet recorded as a generated pack for the Mastercard format: Generate pack records this version in the chain\. Opening the page writes nothing\./)
     expect(within(packEl).getByTestId('pack-notes')).toHaveTextContent('Registration status not in record — confirm with acquirer.')
@@ -347,6 +347,19 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     expect(within(detail).getByTestId('evidence-pack').textContent!.match(/No merchant review record\. The order was Pass at Order check, so no review was flagged\./g)).toHaveLength(1)
     // the old recommendation entry is never shown
     expect(detail.textContent).not.toMatch(/recommend/i)
+  })
+
+  it('no build vocabulary on screen: the Disputes page and the Agent orders merchant-action panel never say "Layer"', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/disputes')
+    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    const detail = await screen.findByTestId('dispute-detail')
+    await within(detail).findByTestId('tamper-line')
+    for (const p of ['visa', 'mastercard']) {
+      await user.selectOptions(within(detail).getByLabelText('Pack format'), p)
+      await within(detail).findByText(p === 'visa' ? 'Dispute condition and transaction' : 'Chargeback details')
+      expect(screen.getByRole('main').textContent).not.toMatch(/layer/i)
+    }
   })
 
   it('Agent orders: a Review Required order offers "Record merchant action" (Layer 2); a Pass order does not', async () => {

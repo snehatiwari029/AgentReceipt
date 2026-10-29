@@ -484,7 +484,7 @@ function ClaimVsRecord({ pack }: { pack: Pack }) {
           <p className="mt-2 text-xs text-dash-label">The customer&apos;s description is not a network code; the condition is shown separately, as filed.</p>
         </div>
         <div className="rounded-lg border border-dash-edge p-3 text-sm">
-          <p className={LABEL}>Record (Layer 1 + Layer 2 only)</p>
+          <p className={LABEL}>What the AgentReceipt record shows (order record and merchant review only)</p>
           <ul className="mt-1 flex flex-col gap-2">
             {pack.claim_vs_record.map((e) => (
               <li key={e.element} data-element={e.element}>
@@ -607,7 +607,7 @@ function PackView({ pack, events, busy, onGenerate, merchant, dispute, onChanged
       {pack.sections.map((s) => (
         <div key={s.key} className="mt-5" data-pack-section={s.key}>
           <p className="mb-2 text-sm font-bold text-dash-ink">{s.title}</p>
-          {s.key === 'layer2' && <p className="mb-2 text-sm text-dash-body" data-testid="layer2-statement">{pack.layer2_statement}</p>}
+          {s.key === 'merchant_review' && <p className="mb-2 text-sm text-dash-body" data-testid="merchant-review-statement">{pack.merchant_review_statement}</p>}
           {s.items.length > 0 && (
             <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm md:grid-cols-[16rem_1fr]">
               {s.items.map((i, k) => (

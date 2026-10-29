@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
-  checkListing, parseMarkup, rankFlags, returnsConflict, suggestedJsonLd, unscannedMarkup,
+  checkListing, displayedTitle, parseMarkup, rankFlags, returnsConflict, suggestedJsonLd, unscannedMarkup,
   type MarkupScan, type Row, type Semantic,
 } from '../../supabase/functions/optimizer/checks'
 import { createSparkListingReader, fallback, keepIfQuoted, sparkInput, type ListingReader } from '../../supabase/functions/optimizer/spark'
 import { approveAll, decide, runScan } from '../../supabase/functions/optimizer/run'
-import { BURTON, CAPITA, final, HISTORY, NONE, northwind, NW, ORCA, OTHER, p, QST, SPA, SPA_HTML, world } from './optimizerFixtures'
+import { BURTON, CAPITA, final, northwind, NW, ORCA, OTHER, p, QST, SPA, SPA_HTML, world } from './optimizerFixtures'
 
 const sparkSays = (matches: boolean | null, deconstructed: Record<string, unknown> = {}): Semantic => ({
   source: 'muse-spark', returns_matches_terms: matches, reason: 'Spark: compared.',
   deconstructed: { brand: null, product_type: null, size_cm: null, colour: null, price: null, shipping: null, returns_claim: null, terms: null, ...deconstructed } as never,
 })
-const ctx = (row: Row, over: Partial<{ markup: MarkupScan; semantic: Semantic; history: typeof HISTORY }> = {}) => ({
+const ctx = (row: Row, over: Partial<{ markup: MarkupScan; semantic: Semantic }> = {}) => ({
   merchantName: 'Northwind Outfitters', catalogue: northwind(), markup: over.markup ?? SPA,
-  semantic: over.semantic ?? fallback(row, 'Spark deconstruction unavailable (test).'), history: over.history ?? NONE,
+  semantic: over.semantic ?? fallback(row, 'Spark deconstruction unavailable (test).'),
 })
 const spellbinder = () => northwind()[0]
 const pillar = (r: ReturnType<typeof checkListing>, n: number) => r.pillars.find((x) => x.pillar === n)!
@@ -35,7 +35,7 @@ describe('Pillar 3 input: the HTML as served', () => {
 })
 
 describe('Spellbinder worked example (feature document section 7)', () => {
-  const r = checkListing(spellbinder(), ctx(spellbinder(), { history: HISTORY }))
+  const r = checkListing(spellbinder(), ctx(spellbinder()))
 
   it('Pillar 1: Missing GTIN / MPN / SKU and availability (not in the catalogue)', () => {
     expect(pillar(r, 1).result).toBe('missing')
@@ -86,12 +86,28 @@ describe('Spellbinder worked example (feature document section 7)', () => {
     expect(f.value_fields).toEqual(['Review count', 'Average rating', 'Q&A count'])
   })
 
-  it('ranks by Section 8: contradiction first; Returns / total fixes that caused real mismatches before identifiers; trust last', () => {
+  it('ranks by the Section 8 category only: contradiction, blocking fields, identifiers, AEO answers, trust', () => {
+    expect(r.flags.map((f) => f.category)).toEqual([...r.flags.map((f) => f.category)].sort((a, b) => a - b))
     const keys = r.flags.map((f) => f.key)
     expect(keys[0]).toBe('p2.returns')
-    expect(keys.indexOf('p3.markup')).toBeLessThan(keys.indexOf('p1.required'))
-    expect(keys.indexOf('p4.qa')).toBeLessThan(keys.indexOf('p1.identifiers'))
+    expect(keys.indexOf('p1.identifiers')).toBeLessThan(keys.indexOf('p4.qa')) // no order-history boost any more
     expect(keys[keys.length - 1]).toBe('p5.metadata')
+  })
+
+  it('impact statements describe agent behaviour, never an order, dispute, Review Required or chargeback outcome', () => {
+    expect(r.flags.find((f) => f.key === 'p2.returns')!.impact).toBe('An agent cannot tell which returns statement is true, so it may repeat the marketing line, skip the listing as ambiguous, or present it inconsistently.')
+    expect(r.flags.find((f) => f.key === 'p3.markup')!.impact).toBe('An agent parsing markup alone does not see price or return policy, so it cannot compare this listing accurately.')
+    for (const row of northwind()) {
+      for (const f of checkListing(row, ctx(row)).flags) {
+        expect(f.impact, `${row.name} ${f.key}`).not.toMatch(/review required|dispute|chargeback|mismatch|\border\b/i)
+        expect(f.impact, `${row.name} ${f.key}`).toMatch(/^An agent /)
+      }
+    }
+  })
+
+  it('carries no order linkage: no order history on the listing and no mismatch fields on a flag', () => {
+    expect(r).not.toHaveProperty('order_history')
+    for (const f of r.flags) expect(f).not.toHaveProperty('mismatch_fields')
   })
 })
 
@@ -133,8 +149,43 @@ describe('Other Northwind listings', () => {
   })
 
   it('rankFlags never puts an identifier fix above a contradiction', () => {
-    const ranked = rankFlags([{ category: 3, mismatch_fields: [], pillar: 1 }, { category: 1, mismatch_fields: [], pillar: 2 }], NONE)
+    const ranked = rankFlags([{ category: 3, pillar: 1 }, { category: 1, pillar: 2 }])
     expect(ranked[0].category).toBe(1)
+  })
+})
+
+describe('Front-loaded title: checked on the title as the store displays it', () => {
+  it('Spellbinder: the displayed title "Burton Spellbinder Snowboard 2026/2027" starts with the brand, so no title flag', () => {
+    const r = checkListing(spellbinder(), ctx(spellbinder()))
+    expect(r.flags.some((f) => f.key === 'p2.title')).toBe(false)
+    expect(pillar(r, 2).notes).toContain('Title front-loaded (Pass): the store displays "Burton Spellbinder Snowboard 2026/2027", brand first.')
+    expect(r.product_name).toBe('Burton Spellbinder Snowboard 2026/2027')
+  })
+
+  it('checks each of the 9 listings on its own displayed title; all 9 start with their brand', () => {
+    for (const row of northwind()) {
+      const r = checkListing(row, ctx(row))
+      expect(r.flags.some((f) => f.key === 'p2.title'), row.name).toBe(false)
+      expect(pillar(r, 2).notes.join(' '), row.name).toContain(`the store displays "${row.brand} ${row.name}", brand first.`)
+    }
+  })
+
+  it('a displayed title that does not start with a brand is flagged, with the displayed title as evidence', () => {
+    const row = p(ORCA, { name: 'T. Rice Orca Snowboard 2025/2026', brand: null })
+    const f = checkListing(row, ctx(row)).flags.find((x) => x.key === 'p2.title')!
+    expect(f.title).toBe('Displayed title does not start with the brand')
+    expect(f.evidence[0]).toBe('Displayed title: "T. Rice Orca Snowboard 2025/2026" (the store shows the brand line, then the name).')
+    expect(f.value_fields).toEqual(['brand']) // to be filled by the merchant, never by the optimizer
+  })
+
+  it('does not double a brand the name already starts with', () => {
+    expect(displayedTitle({ name: 'Burton Spellbinder', brand: 'Burton' })).toBe('Burton Spellbinder')
+    expect(displayedTitle({ name: 'Spellbinder', brand: 'Burton' })).toBe('Burton Spellbinder')
+  })
+
+  it('the 9 Northwind rows produce 55 flags (64 before: the 9 title flags were removed)', () => {
+    const total = northwind().reduce((n, row) => n + checkListing(row, ctx(row)).flags.length, 0)
+    expect(total).toBe(55)
   })
 })
 
@@ -167,17 +218,22 @@ describe('Muse Spark client: listing fields in, nothing invented out', () => {
 })
 
 describe('Scan Now, decisions and re-scan (run.ts)', () => {
-  it('scans the merchant\'s 9 listings only, counts its mismatches live, and writes nothing but optimizer tables', async () => {
+  it('scans the merchant\'s 9 listings only, reads no orders, and writes nothing but optimizer tables', async () => {
     const w = world()
     const r = await runScan({ merchant_id: NW }, w.deps)
     expect(r).toMatchObject({ type: 'scan', listings_scanned: 9, markup_status: 'fetched', spark: { 'rules-fallback': 9 } })
-    const scan = w.tables.optimizer_scans[0] as { results: { product_id: string }[]; aggregate_mismatch_counts: unknown }
+    const scan = w.tables.optimizer_scans[0] as { results: Record<string, unknown>[] }
     expect(scan.results.map((x) => x.product_id)).not.toContain('11111111-1111-4111-8111-111111111111')
-    expect(scan.aggregate_mismatch_counts).toEqual({ Budget: 3, Returns: 3 })
+    expect(scan).not.toHaveProperty('aggregate_mismatch_counts')
+    for (const x of scan.results) expect(x).not.toHaveProperty('order_history')
+    expect(Object.keys(w.deps.db).sort()).toEqual(['insertScan', 'insertSuggestions', 'merchant', 'products', 'suggestions', 'updateSuggestion'])
     expect(new Set(w.writes)).toEqual(new Set(['optimizer_scans', 'optimizer_suggestions']))
     expect(w.tables.optimizer_suggestions.every((s) => s.merchant_id === NW && s.status === 'pending')).toBe(true)
     expect(w.tables.optimizer_suggestions.every((s) => Object.keys(s.merchant_values).length === 0)).toBe(true)
-    expect(w.find(BURTON, 'p2.returns').caused_mismatch_count).toBe(3)
+    for (const s of w.tables.optimizer_suggestions) {
+      expect(s).not.toHaveProperty('caused_mismatch_count')
+      expect(s).not.toHaveProperty('mismatch_fields')
+    }
   })
 
   it('approval records merchant, time and typed value; it never changes the listing', async () => {

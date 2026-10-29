@@ -1,7 +1,8 @@
 // Supabase-backed OptimizerDb. Runs in the edge function with the service role (auto-injected, never in the repo).
-// Every read and write is filtered by merchant_id. Writes touch optimizer_scans and optimizer_suggestions only.
+// Every read and write is filtered by merchant_id. It reads merchants and products only (no orders, receipts, grants or
+// chat). Writes touch optimizer_scans and optimizer_suggestions only.
 import type { OptimizerDb, SuggestionRow } from './run.ts'
-import { parseMarkup, unscannedMarkup, type MarkupScan, type ReceiptFacts, type Row } from './checks.ts'
+import { parseMarkup, unscannedMarkup, type MarkupScan, type Row } from './checks.ts'
 
 // deno-lint-ignore no-explicit-any
 type Db = any
@@ -9,14 +10,6 @@ type Db = any
 function must<T>(res: { data?: T; error: { message: string } | null }, what: string): T {
   if (res.error) throw new Error(`${what}: ${res.error.message}`)
   return res.data as T
-}
-
-const productIdOf = (r: Record<string, unknown>) => {
-  for (const k of ['terms_snapshot', 'action_summary']) {
-    const v = r[k] as Record<string, unknown> | null
-    if (v && typeof v.product_id === 'string') return v.product_id
-  }
-  return null
 }
 
 export function createOptimizerDb(db: Db): OptimizerDb {
@@ -28,19 +21,6 @@ export function createOptimizerDb(db: Db): OptimizerDb {
     async products(merchantId) {
       const r = await db.from('products').select('*').eq('merchant_id', merchantId).order('sort_order', { ascending: true })
       return must<Row[]>(r, 'read products') ?? []
-    },
-    // Aggregate facts only: which listing, which order ref, which fields mismatched. No grant, chat or customer field.
-    async receiptFacts(merchantId) {
-      const r = await db.from('receipts').select('receipt_ref,order_ref,terms_snapshot,action_summary,mismatch_results').eq('merchant_id', merchantId)
-      const rows = must<Record<string, unknown>[]>(r, 'read receipts') ?? []
-      return rows.map((x): ReceiptFacts => ({
-        receipt_ref: String(x.receipt_ref),
-        order_ref: typeof x.order_ref === 'string' ? x.order_ref : null,
-        product_id: productIdOf(x),
-        mismatch_fields: (Array.isArray(x.mismatch_results) ? x.mismatch_results : [])
-          .filter((m: Record<string, unknown>) => m?.result === 'mismatch' && typeof m.field === 'string')
-          .map((m: Record<string, unknown>) => m.field as string),
-      }))
     },
     async suggestions(merchantId) {
       const r = await db.from('optimizer_suggestions').select('*').eq('merchant_id', merchantId)

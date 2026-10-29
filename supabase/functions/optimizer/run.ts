@@ -1,10 +1,10 @@
 // Listing Optimizer: scan, re-scan and merchant decisions. Runs in the `optimizer` edge function.
-// It reads one merchant's listings, page markup and aggregate Order check mismatch counts, and writes only its own two
+// It reads one merchant's listings and the store page markup, and writes only its own two
 // tables (optimizer_scans, optimizer_suggestions). It has no way to write a product, price, term or page: the OptimizerDb
 // interface below has no such method. Approval records a decision; the merchant applies the fix in their own store.
 import {
-  aggregateCounts, causedCount, checkListing, historyByListing, severityOf,
-  type Flag, type ListingResult, type MarkupScan, type ReceiptFacts, type Row, type Semantic,
+  checkListing, severityOf,
+  type Flag, type ListingResult, type MarkupScan, type Row, type Semantic,
 } from './checks.ts'
 import { fallback, type ListingReader } from './spark.ts'
 
@@ -27,8 +27,6 @@ export interface SuggestionRow {
   merchant_fix_text: string | null
   value_fields: string[]
   merchant_values: Record<string, string>
-  mismatch_fields: string[]
-  caused_mismatch_count: number
   source: string
   status: Status
   decided_by: string | null
@@ -43,7 +41,6 @@ export interface SuggestionRow {
 export interface OptimizerDb {
   merchant(id: string): Promise<{ id: string; name: string } | null>
   products(merchantId: string): Promise<Row[]>
-  receiptFacts(merchantId: string): Promise<ReceiptFacts[]>
   suggestions(merchantId: string): Promise<SuggestionRow[]>
   insertSuggestions(rows: SuggestionRow[]): Promise<void>
   updateSuggestion(merchantId: string, id: string, patch: Partial<SuggestionRow>): Promise<void>
@@ -90,14 +87,12 @@ export async function runScan(body: Record<string, unknown>, deps: Deps): Promis
 
   // This merchant's listings only (filtered in the query and again here).
   const rows = (await deps.db.products(merchantId)).filter((r) => r.merchant_id === merchantId)
-  const receipts = await deps.db.receiptFacts(merchantId)
-  const history = historyByListing(receipts)
   const markup = await deps.fetchMarkup()
   const semantics = await Promise.all(rows.map((r) => deps.reader.deconstruct(r).catch(() => fallback(r, 'Spark deconstruction unavailable (call failed).'))))
   const semanticBy = new Map(rows.map((r, i) => [r.id, semantics[i]]))
 
   const results: ListingResult[] = rows.map((r, i) =>
-    checkListing(r, { merchantName: merchant.name, catalogue: rows, markup, semantic: semantics[i], history: history.get(r.id) ?? { orders: [], fields: {} } }))
+    checkListing(r, { merchantName: merchant.name, catalogue: rows, markup, semantic: semantics[i] }))
 
   const scanId = deps.newId()
   const at = deps.now().toISOString()
@@ -112,7 +107,6 @@ export async function runScan(body: Record<string, unknown>, deps: Deps): Promis
     catalogue_source: 'Supabase catalogue snapshot (demo; not live Shopify sync)',
     markup: { status: markup.status, url: markup.url, http_status: markup.http_status, bytes: markup.bytes, products_found: markup.products.length, has_microdata_product: markup.has_microdata_product, has_breadcrumbs: markup.has_breadcrumbs, has_faq: markup.has_faq, error: markup.error },
     spark,
-    aggregate_mismatch_counts: aggregateCounts(receipts),
     results: results.map(({ flags, ...rest }) => ({ ...rest, flag_keys: flags.map((f) => f.key) })),
   })
 
@@ -127,7 +121,7 @@ export async function runScan(body: Record<string, unknown>, deps: Deps): Promis
     for (const f of res.flags) {
       const k = `${res.product_id}|${f.key}`
       seen.add(k)
-      const content = flagContent(f, res)
+      const content = flagContent(f)
       const prev = byKey.get(k)
       if (!prev) {
         fresh.push({
@@ -175,11 +169,11 @@ export async function runScan(body: Record<string, unknown>, deps: Deps): Promis
   }
 }
 
-function flagContent(f: Flag, res: ListingResult) {
+function flagContent(f: Flag) {
   return {
     pillar: f.pillar, flag_type: f.flag_type, subtype: f.subtype, category: f.category, severity: severityOf(f.category),
     title: f.title, evidence: f.evidence, impact: f.impact, suggested_fix: f.suggested_fix, value_fields: f.value_fields,
-    mismatch_fields: f.mismatch_fields, caused_mismatch_count: causedCount(f, res.order_history), source: f.source,
+    source: f.source,
   }
 }
 

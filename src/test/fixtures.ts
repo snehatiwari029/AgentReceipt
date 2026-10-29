@@ -39,7 +39,7 @@ const final = { formal_returns: 'final_sale' as const, formal_terms_text: 'Final
 const photo = (f: string) => `https://example.test/storage/product-images/products/${f}`
 
 export const NINE: Product[] = [
-  row({ name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Blue/Black', price_cents: 44995, featured: true, sort_order: 1, marketing_blurb: 'Easy returns.', image_url: photo('burton-spellbinder.png'), ...final }),
+  row({ name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', size_cm: 156, colour: 'Serpent', price_cents: 44995, featured: true, sort_order: 1, marketing_blurb: 'Easy returns.', image_url: photo('burton-spellbinder.png'), ...final }),
   row({ name: 'T. Rice Orca Snowboard 2025/2026', brand: 'Lib Tech', size_cm: 156, price_cents: 48983, sort_order: 2 }),
   row({ name: 'Outerspace Living Snowboard 2025/2026', brand: 'Capita', size_cm: 156, price_cents: 37083, sort_order: 3 }),
   row({ name: 'Assassin Snowboard 2025/2026', brand: 'Salomon', size_cm: 156, price_cents: 45483, sort_order: 4 }),

@@ -9,7 +9,6 @@ import { buildSeed } from '../../scripts/seed-dashboard-demo'
 vi.mock('../shared/supabase', () => ({ supabase: fakeClient }))
 
 import AppRoutes from '../app/AppRoutes'
-import { causeCounts, fieldCounts } from '../dashboard/pages/Optimization'
 import { runScan } from '../../supabase/functions/optimizer/run'
 import { BURTON, NW, world } from './optimizerFixtures'
 import type { Receipt } from '../shared/schemas'
@@ -214,7 +213,7 @@ describe('Optimization for Agents', () => {
     expect(await screen.findByText(/Scan finished: 9 listings/)).toBeInTheDocument()
   })
 
-  it('shows the scan: header, summary, 9 listing rows, and the Spellbinder worked example open with its Order check link', async () => {
+  it('shows the scan: header, summary, 9 listing rows, and the Spellbinder worked example open', async () => {
     await scanned()
     open('/dashboard/optimization')
     expect(await screen.findAllByTestId('optimizer-listing')).toHaveLength(9)
@@ -222,14 +221,23 @@ describe('Optimization for Agents', () => {
     expect(header).toHaveTextContent('Northwind Outfitters')
     expect(within(header).getByRole('link', { name: 'View Store' })).toHaveAttribute('href', '/shop')
     expect(screen.getByText('Listings scanned').nextSibling).toHaveTextContent('9')
-    expect(screen.getByText('Top priority').nextSibling).toHaveTextContent('Contradictions first — Returns')
+    expect(screen.getByText('Top priority').nextSibling).toHaveTextContent(/^Contradictions first$/)
     expect(screen.getAllByText('Pillar 2: Contradiction — Marketing "Easy returns." vs formal terms "Final Sale"')).toHaveLength(1)
-    expect(screen.getByText(/3 orders on this listing had mismatches — 12322, 15001, 15002/)).toHaveTextContent('Budget mismatches: 3 · Returns mismatches: 3')
     expect(screen.getAllByRole('button', { name: 'Hide checklist' })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: 'Show checklist and fixes' })).toHaveLength(8)
-    for (const c of fieldCounts(SEEDED.receipts.data as Receipt[])) {
-      expect(screen.getByText(`${c.field}`, { selector: 'span' }).parentElement).toHaveTextContent(`${c.field} mismatches: ${c.count}`)
-    }
+  })
+
+  it('shows no Order check linkage: no order numbers, mismatch counts, "linked to" tags or caused-mismatch filter', async () => {
+    const user = userEvent.setup()
+    await scanned()
+    open('/dashboard/optimization')
+    await screen.findAllByTestId('optimizer-listing')
+    for (const b of screen.getAllByRole('button', { name: 'Show checklist and fixes' })) await user.click(b) // open every listing
+    expect(await screen.findAllByRole('button', { name: 'Hide checklist' })).toHaveLength(9)
+    const text = screen.getByRole('main').textContent ?? '' // the page itself; the sidebar nav still links to Disputes
+    for (const banned of ['12322', '13422', '14522', '15001', '15002', 'Budget mismatches', 'Returns mismatches', 'Open Agent orders']) expect(text).not.toContain(banned)
+    expect(text).not.toMatch(/linked to|caused a real order mismatch|review required|chargeback|dispute/i)
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
   it('Approve All says it applies nothing, and sends only the pending suggestions shown', async () => {
@@ -238,11 +246,11 @@ describe('Optimization for Agents', () => {
     open('/dashboard/optimization')
     await screen.findAllByTestId('optimizer-listing')
     expect(screen.getByText(/It does not apply them: no listing, price, term or page\s+changes/)).toBeInTheDocument()
-    await user.click(screen.getByLabelText('Caused a real order mismatch'))
+    await user.selectOptions(screen.getByLabelText('Flag type'), 'contradiction')
     await user.click(screen.getByRole('button', { name: /^Approve All/ }))
     const sent = calls[0].body.suggestion_ids as string[]
     expect(calls[0].body.action).toBe('approve_all')
-    expect(new Set(sent)).toEqual(new Set(w.tables.optimizer_suggestions.filter((s) => s.caused_mismatch_count > 0).map((s) => s.id)))
+    expect(sent).toEqual([w.find(BURTON, 'p2.returns').id])
     expect(await screen.findByText(/2 left pending because a To-be-filled field is empty. Nothing in your store was changed./)).toBeInTheDocument()
   })
 
@@ -264,7 +272,7 @@ describe('Optimization for Agents', () => {
     expect(calls[0].body).toMatchObject({ action: 'decide', suggestion_id: id, decision: 'approve', values: { GTIN: '0123', MPN: 'M1', SKU: 'S1' } })
   })
 
-  it('filters by pillar, flag type and "caused a real order mismatch"', async () => {
+  it('filters by pillar and flag type only', async () => {
     const user = userEvent.setup()
     await scanned()
     open('/dashboard/optimization')
@@ -274,18 +282,11 @@ describe('Optimization for Agents', () => {
     await user.selectOptions(screen.getByLabelText('Flag type'), 'all')
     await user.selectOptions(screen.getByLabelText('Pillar'), '1')
     expect(screen.getAllByTestId('optimizer-listing')).toHaveLength(9)
-    await user.click(screen.getByLabelText('Caused a real order mismatch'))
-    expect(screen.getByText('No listings match these filters.')).toBeInTheDocument() // feed / identifier flags caused no mismatch
-    await user.selectOptions(screen.getByLabelText('Pillar'), 'all')
+    await user.selectOptions(screen.getByLabelText('Flag type'), 'contradiction')
+    expect(screen.getByText('No listings match these filters.')).toBeInTheDocument() // Pillar 1 has no contradiction here
+    await user.selectOptions(screen.getByLabelText('Pillar'), '2')
     expect(screen.getAllByTestId('optimizer-listing')).toHaveLength(1)
+    expect(within(screen.getByRole('group', { name: 'Filters' })).getAllByRole('combobox')).toHaveLength(2)
   })
 
-  it('counts mismatch causes only for mismatches', () => {
-    const r = { mismatch_results: [
-      { field: 'Budget', result: 'mismatch', cause: 'Cap read as item-only' },
-      { field: 'Colour', result: 'unspecified', cause: null },
-    ] } as unknown as Receipt
-    expect(causeCounts([r, r])).toEqual([{ field: 'Budget', cause: 'Cap read as item-only', count: 2 }])
-    expect(fieldCounts([r, r])).toEqual([{ field: 'Budget', count: 2 }])
-  })
 })

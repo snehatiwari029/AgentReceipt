@@ -9,7 +9,7 @@ import { computeEntryHash, canonicalJson, sha256Hex } from '../../supabase/funct
 const MERCHANT = '32b14be6-26e6-49df-a7af-79532f910510'
 const BURTON = '40c70768-77ac-4953-8bae-c75c8319fcf4'
 const CATALOG = [
-  { id: BURTON, name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', category: 'snowboard', size_cm: 156, colour: 'Blue/Black', price_cents: 44995, formal_returns: 'final_sale', formal_terms_text: 'Final Sale', standard_shipping_cents: 0, expedited_shipping_cents: 6000 },
+  { id: BURTON, name: 'Spellbinder Snowboard 2026/2027', brand: 'Burton', category: 'snowboard', size_cm: 156, colour: 'Serpent', price_cents: 44995, formal_returns: 'final_sale', formal_terms_text: 'Final Sale', standard_shipping_cents: 0, expedited_shipping_cents: 6000 },
 ]
 const NOW = new Date('2026-10-28T20:00:00.000Z')
 

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Receipt } from '../../shared/schemas'
-import { useRows, type Rows } from '../data'
+import { useRows } from '../data'
 import { Card, Empty, Live, PageTitle } from '../components/Panel'
 import { CATEGORY_LABELS, PILLAR_NAMES, type Category, type Pillar, type PillarResult } from '../../../supabase/functions/optimizer/checks'
 import { callOptimizer, rankSuggestions, STATUS_LABEL, type Scan, type ScanListing, type Suggestion } from '../optimizer'
@@ -9,27 +8,9 @@ import { callOptimizer, rankSuggestions, STATUS_LABEL, type Scan, type ScanListi
 // The dashboard is Northwind's (demo sign-in). Everything below is filtered to this merchant.
 const MERCHANT_NAME = 'Northwind Outfitters'
 
-// Counted live from the line-by-line checks stored on receipts. Never a hard-coded number.
-export function causeCounts(receipts: Receipt[]): { field: string; cause: string; count: number }[] {
-  const map = new Map<string, { field: string; cause: string; count: number }>()
-  for (const r of receipts) {
-    for (const m of r.mismatch_results) {
-      if (m.result !== 'mismatch') continue
-      const cause = m.cause ?? 'No cause recorded'
-      const key = `${m.field}||${cause}`
-      const cur = map.get(key)
-      if (cur) cur.count += 1
-      else map.set(key, { field: m.field, cause, count: 1 })
-    }
-  }
-  return [...map.values()].sort((a, b) => b.count - a.count)
-}
-
-export function fieldCounts(receipts: Receipt[]): { field: string; count: number }[] {
-  const map = new Map<string, number>()
-  for (const c of causeCounts(receipts)) map.set(c.field, (map.get(c.field) ?? 0) + c.count)
-  return [...map.entries()].map(([field, count]) => ({ field, count })).sort((a, b) => b.count - a.count || a.field.localeCompare(b.field))
-}
+// The optimizer is a five-pillar guideline only. Order check linkage (mismatch counts, order numbers, "linked to" tags
+// and a "caused a real order mismatch" filter) was removed on 2026-10-29: a weak listing may simply be skipped by an
+// agent rather than cause a dispute, and the counts conflated problem instances with orders. Do not reintroduce it.
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
@@ -46,16 +27,15 @@ const SEVERITY: Record<string, { label: string; border: string; text: string }> 
   lower: { label: 'Lower impact', border: 'border-dash-edge', text: 'text-dash-label' },
 }
 
-type Filters = { pillar: 'all' | Pillar; type: 'all' | 'contradiction' | 'missing'; caused: boolean }
+type Filters = { pillar: 'all' | Pillar; type: 'all' | 'contradiction' | 'missing' }
 const matches = (s: Suggestion, f: Filters) =>
-  (f.pillar === 'all' || s.pillar === f.pillar) && (f.type === 'all' || s.flag_type === f.type) && (!f.caused || s.caused_mismatch_count > 0)
+  (f.pillar === 'all' || s.pillar === f.pillar) && (f.type === 'all' || s.flag_type === f.type)
 
 export default function Optimization() {
   const [reload, setReload] = useState(0)
   const merchants = useRows<{ id: string; name: string }>('merchants', 'name', true)
   const scans = useRows<Scan>('optimizer_scans', 'scanned_at', false, reload)
   const suggestions = useRows<Suggestion>('optimizer_suggestions', 'category', true, reload)
-  const receipts = useRows<Receipt>('receipts', 'chain_seq', false, reload)
 
   return (
     <div className="flex flex-col gap-6">
@@ -76,7 +56,6 @@ export default function Optimization() {
                       merchant={merchant}
                       scan={scanRows.find((s) => s.merchant_id === merchant.id) ?? null}
                       suggestions={sugRows.filter((s) => s.merchant_id === merchant.id)}
-                      receipts={receipts}
                       onChanged={() => setReload((n) => n + 1)}
                     />
                   )}
@@ -90,16 +69,15 @@ export default function Optimization() {
   )
 }
 
-function Workspace({ merchant, scan, suggestions, receipts, onChanged }: {
+function Workspace({ merchant, scan, suggestions, onChanged }: {
   merchant: { id: string; name: string }
   scan: Scan | null
   suggestions: Suggestion[]
-  receipts: Rows<Receipt>
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
-  const [filters, setFilters] = useState<Filters>({ pillar: 'all', type: 'all', caused: false })
+  const [filters, setFilters] = useState<Filters>({ pillar: 'all', type: 'all' })
   const current = useMemo(() => {
     const listed = new Set(scan?.results.map((r) => r.product_id) ?? [])
     return suggestions.filter((s) => listed.has(s.product_id))
@@ -168,7 +146,7 @@ function Workspace({ merchant, scan, suggestions, receipts, onChanged }: {
         <Empty title="No scan yet.">Click Scan Now to scan your listings. Results come only from a scan of your live catalogue.</Empty>
       ) : (
         <>
-          <ScanSummary scan={scan} suggestions={current} receipts={receipts} />
+          <ScanSummary scan={scan} suggestions={current} />
           <FilterBar filters={filters} onChange={setFilters} />
           <ListingList scan={scan} suggestions={current} filters={filters} merchantId={merchant.id} onChanged={onChanged} />
         </>
@@ -177,12 +155,12 @@ function Workspace({ merchant, scan, suggestions, receipts, onChanged }: {
   )
 }
 
-function ScanSummary({ scan, suggestions, receipts }: { scan: Scan; suggestions: Suggestion[]; receipts: Rows<Receipt> }) {
+function ScanSummary({ scan, suggestions }: { scan: Scan; suggestions: Suggestion[] }) {
   const withContradiction = scan.results.filter((r) => r.pillars.some((p) => p.result === 'contradiction')).length
   const withMissing = scan.results.filter((r) => r.pillars.some((p) => p.result === 'missing')).length
   const open = rankSuggestions(suggestions.filter((s) => s.status !== 'resolved' && s.status !== 'rejected'))
   const top = open[0]
-  const topText = top ? `${CATEGORY_LABELS[top.category as Category]}s first${top.mismatch_fields[0] ? ` — ${top.mismatch_fields[0]}` : ''}` : 'Nothing open'
+  const topText = top ? `${CATEGORY_LABELS[top.category as Category]}s first` : 'Nothing open'
   const m = scan.markup
   const sparkText = Object.entries(scan.spark).map(([k, n]) => `${k} on ${n}`).join(', ')
 
@@ -211,24 +189,6 @@ function ScanSummary({ scan, suggestions, receipts }: { scan: Scan; suggestions:
         </li>
         <li>Semantic reading: {sparkText}. rules-fallback means deterministic check only, Spark deconstruction unavailable.</li>
       </ul>
-      <div className="mt-4 border-t border-dash-edge pt-4">
-        <p className="text-sm font-semibold text-dash-ink">Order check mismatches across your catalogue (counted live from receipts)</p>
-        <div className="mt-2">
-          <Live state={receipts}>
-            {(rows) => {
-              const counts = fieldCounts(rows)
-              if (counts.length === 0) return <p className="text-sm text-dash-body">No mismatches recorded yet.</p>
-              return (
-                <ul className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                  {counts.map((c) => (
-                    <li key={c.field}><span className="font-semibold text-dash-ink">{c.field}</span> mismatches: <span className="font-bold text-dash-violation">{c.count}</span></li>
-                  ))}
-                </ul>
-              )
-            }}
-          </Live>
-        </div>
-      </div>
     </Card>
   )
 }
@@ -252,10 +212,6 @@ function FilterBar({ filters, onChange }: { filters: Filters; onChange: (f: Filt
           <option value="missing">Missing</option>
         </select>
       </label>
-      <label className="flex items-center gap-2">
-        <input type="checkbox" checked={filters.caused} onChange={(e) => onChange({ ...filters, caused: e.target.checked })} />
-        Caused a real order mismatch
-      </label>
     </div>
   )
 }
@@ -263,10 +219,10 @@ function FilterBar({ filters, onChange }: { filters: Filters; onChange: (f: Filt
 function ListingList({ scan, suggestions, filters, merchantId, onChanged }: {
   scan: Scan; suggestions: Suggestion[]; filters: Filters; merchantId: string; onChanged: () => void
 }) {
-  const filtering = filters.pillar !== 'all' || filters.type !== 'all' || filters.caused
-  // The worked example opens by default: the first listing with real Order check mismatches.
-  const firstWithHistory = scan.results.find((r) => r.order_history.orders.length > 0)?.product_id ?? null
-  const [open, setOpen] = useState<Set<string>>(() => new Set(firstWithHistory ? [firstWithHistory] : []))
+  const filtering = filters.pillar !== 'all' || filters.type !== 'all'
+  // The worked example opens by default: the first listing with a Contradiction.
+  const firstContradiction = scan.results.find((r) => r.pillars.some((p) => p.result === 'contradiction'))?.product_id ?? null
+  const [open, setOpen] = useState<Set<string>>(() => new Set(firstContradiction ? [firstContradiction] : []))
   const listings = scan.results.filter((r) => !filtering || suggestions.some((s) => s.product_id === r.product_id && matches(s, filters)))
   if (listings.length === 0) return <Empty title="No listings match these filters.">Change a filter to see more.</Empty>
 
@@ -310,18 +266,10 @@ function ListingList({ scan, suggestions, filters, merchantId, onChanged }: {
 }
 
 function ListingDetail({ listing, suggestions, merchantId, onChanged }: { listing: ScanListing; suggestions: Suggestion[]; merchantId: string; onChanged: () => void }) {
-  const h = listing.order_history
   const d = listing.semantic.deconstructed
   const parts = d ? Object.entries(d).filter(([, v]) => v !== null) : []
   return (
     <div className="mt-4 flex flex-col gap-4 border-t border-dash-edge pt-4">
-      {h.orders.length > 0 && (
-        <p className="rounded-lg border border-dash-attention bg-dash-card-raised p-3 text-sm">
-          <span className="font-semibold text-dash-ink">Order check:</span> {h.orders.length} order{h.orders.length > 1 ? 's' : ''} on this listing had mismatches — {h.orders.join(', ')}.{' '}
-          {Object.entries(h.fields).map(([f, n]) => `${f} mismatches: ${n}`).join(' · ')}. The flags below are the causes.{' '}
-          <Link to="/dashboard/orders" className="font-semibold text-dash-teal hover:underline">Open Agent orders</Link>
-        </p>
-      )}
       <p className="text-xs text-dash-label">
         Semantic reading: <span className={listing.semantic.source === 'muse-spark' ? 'text-dash-teal' : 'text-dash-attention'}>{listing.semantic.label}</span>. {listing.semantic.reason}
         {parts.length > 0 && <> Spark read the copy as: {parts.map(([k, v]) => `${k} ${JSON.stringify(v)}`).join(', ')}.</>}
@@ -379,7 +327,6 @@ function SuggestionCard({ s, merchantId, onChanged }: { s: Suggestion; merchantI
       <p className="flex flex-wrap gap-x-3 text-xs font-bold">
         <span className={sev.text}>{CATEGORY_LABELS[s.category as Category]} · {sev.label}</span>
         <span className="text-dash-label">Pillar {s.pillar} · {s.subtype}</span>
-        {s.caused_mismatch_count > 0 && <span className="text-dash-violation">Linked to {s.caused_mismatch_count} real Order check mismatch{s.caused_mismatch_count > 1 ? 'es' : ''} ({s.mismatch_fields.join(', ')})</span>}
         {s.source !== 'deterministic' && <span className="text-dash-label">{s.source}</span>}
       </p>
       <p className="mt-1 font-semibold text-dash-ink">{s.title}</p>

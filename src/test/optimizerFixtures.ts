@@ -1,5 +1,5 @@
 // TEST fixtures only, for the Listing Optimizer tests. The app contains no product data: it reads the products table.
-import { parseMarkup, type MarkupScan, type ReceiptFacts, type Row } from '../../supabase/functions/optimizer/checks'
+import { parseMarkup, type MarkupScan, type Row } from '../../supabase/functions/optimizer/checks'
 import { createSparkListingReader, type ListingReader } from '../../supabase/functions/optimizer/spark'
 import type { Deps, OptimizerDb, SuggestionRow } from '../../supabase/functions/optimizer/run'
 
@@ -31,29 +31,16 @@ export const northwind = (): Row[] => [
 // The shop is a single-page app: this is what its HTML looks like as served (no product data until JavaScript runs).
 export const SPA_HTML = '<!doctype html><html><head><title>AgentReceipt</title></head><body><div id="root"></div><script type="module" src="/assets/index.js"></script></body></html>'
 export const SPA = parseMarkup(SPA_HTML, 'https://store.test/shop', 200)
-export const receipts: ReceiptFacts[] = [
-  { receipt_ref: 'AR-2026-0042', order_ref: '12322', product_id: BURTON, mismatch_fields: ['Budget', 'Returns'] },
-  { receipt_ref: 'AR-2026-0043', order_ref: '13422', product_id: ORCA, mismatch_fields: [] },
-  { receipt_ref: 'AR-2026-0044', order_ref: '15001', product_id: BURTON, mismatch_fields: ['Budget', 'Returns'] },
-  { receipt_ref: 'AR-2026-0045', order_ref: '15002', product_id: BURTON, mismatch_fields: ['Budget', 'Returns'] },
-]
-export const HISTORY = { orders: ['12322', '15001', '15002'], fields: { Budget: 3, Returns: 3 } }
-export const NONE = { orders: [], fields: {} }
 
 // An in-memory database that plays the optimizer's tables, plus another merchant that must never show up.
 export function world(opts: { rows?: Row[]; reader?: ListingReader; markup?: () => MarkupScan } = {}) {
   const products: Row[] = [...(opts.rows ?? northwind()), p('11111111-1111-4111-8111-111111111111', { merchant_id: OTHER, name: 'Other Board', brand: 'Other' })]
-  const facts: (ReceiptFacts & { merchant_id: string })[] = [
-    ...receipts.map((r) => ({ ...r, merchant_id: NW })),
-    { receipt_ref: 'AR-X', order_ref: '99999', product_id: '11111111-1111-4111-8111-111111111111', mismatch_fields: ['Colour'], merchant_id: OTHER },
-  ]
   const tables = { optimizer_suggestions: [] as SuggestionRow[], optimizer_scans: [] as Record<string, unknown>[] }
   const writes: string[] = []
   let n = 0
   const db: OptimizerDb = {
     async merchant(id) { return id === NW ? { id, name: 'Northwind Outfitters' } : id === OTHER ? { id, name: 'Other Merchant' } : null },
     async products(m) { return products.filter((x) => x.merchant_id === m).map((x) => ({ ...x })) },
-    async receiptFacts(m) { return facts.filter((f) => f.merchant_id === m) },
     async suggestions(m) { return tables.optimizer_suggestions.filter((s) => s.merchant_id === m).map((s) => ({ ...s })) },
     async insertSuggestions(rows) { writes.push('optimizer_suggestions'); tables.optimizer_suggestions.push(...rows) },
     async updateSuggestion(m, id, patch) {

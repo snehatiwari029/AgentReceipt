@@ -37,15 +37,12 @@ export type Scan = {
   catalogue_source: string
   markup: { status: string; url: string | null; http_status: number | null; bytes: number; products_found: number; error: string | null }
   spark: Record<string, number>
-  aggregate_mismatch_counts: Record<string, number>
   results: ScanListing[]
 }
 
-// Section 8, same rule as the function's rankFlags: category first; a category 3-5 flag that already caused a real
-// mismatch ranks just after category 2; then by mismatches caused.
-export function rankSuggestions<T extends Pick<Suggestion, 'category' | 'caused_mismatch_count' | 'pillar'>>(list: T[]): T[] {
-  const tier = (s: T) => (s.category <= 2 ? s.category : s.caused_mismatch_count > 0 ? 2.5 : s.category)
-  return [...list].sort((a, b) => tier(a) - tier(b) || b.caused_mismatch_count - a.caused_mismatch_count || a.pillar - b.pillar)
+// Section 8 only, same rule as the function's rankFlags: category first, then pillar. No order history is used.
+export function rankSuggestions<T extends Pick<Suggestion, 'category' | 'pillar'>>(list: T[]): T[] {
+  return [...list].sort((a, b) => a.category - b.category || a.pillar - b.pillar)
 }
 
 export const STATUS_LABEL: Record<Suggestion['status'], string> = {

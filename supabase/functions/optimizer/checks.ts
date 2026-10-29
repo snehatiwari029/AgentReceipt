@@ -2,6 +2,8 @@
 // Presence / absence of a field, an identifier or Schema.org markup, and every total, are decided here by code.
 // Spark's semantic reading (spark.ts) arrives as an input; this file only maps it to a flag and labels its source.
 // The optimizer never fills a missing value: a missing field becomes a flag with an empty "to be filled" field.
+// It is a five-pillar guideline only. It does not read orders or receipts and does not link a flag to an order or a
+// dispute (that linkage was removed on 2026-10-29: a weak listing may simply be skipped, not cause a dispute).
 
 export type Pillar = 1 | 2 | 3 | 4 | 5
 export type PillarResult = 'pass' | 'missing' | 'contradiction' | 'not_checked'
@@ -41,7 +43,6 @@ export interface Flag {
   impact: string
   suggested_fix: string
   value_fields: string[] // empty, editable "To be filled by merchant" fields; never pre-filled
-  mismatch_fields: string[] // Order check fields this flag can cause, e.g. ['Returns', 'Budget']
   source: 'deterministic' | SemanticSource
 }
 
@@ -105,11 +106,6 @@ export interface Semantic {
   reason: string
 }
 
-export interface OrderHistory {
-  orders: string[] // order refs of this listing's orders with at least one mismatch (no customer data)
-  fields: Record<string, number> // mismatch counts by Order check field, this listing only
-}
-
 export interface ListingResult {
   product_id: string
   product_name: string
@@ -122,7 +118,6 @@ export interface ListingResult {
   pillars: PillarCheck[]
   flags: Flag[]
   semantic: { source: SemanticSource; label: string; reason: string; deconstructed: Deconstructed | null }
-  order_history: OrderHistory
 }
 
 // ---------- small helpers ----------
@@ -182,6 +177,14 @@ const COLOUR_WORDS =
 export function colourInProse(details: string | null): string | null {
   if (!details) return null
   return details.split(',').map((s) => s.trim()).find((s) => COLOUR_WORDS.test(s)) ?? null
+}
+
+// The title as the store displays it: the brand line above the product name (src/shop/components/ProductCard.tsx and
+// ProductDetails.tsx; the image alt text is the same "Brand Name"). A name that already starts with the brand is not doubled.
+export function displayedTitle(row: Pick<Row, 'name'> & { brand?: unknown }): string {
+  const brand = text(row.brand)
+  if (!brand || norm(row.name).startsWith(norm(brand))) return row.name
+  return `${brand} ${row.name}`
 }
 
 // ---------- Pillar 3 input: the HTML exactly as served ----------
@@ -344,7 +347,6 @@ export interface ListingContext {
   catalogue: Row[] // this merchant's listings only
   markup: MarkupScan
   semantic: Semantic
-  history: OrderHistory
 }
 
 export function checkListing(row: Row, ctx: ListingContext): ListingResult {
@@ -377,7 +379,7 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
             : `${k}: empty in the catalogue.`),
       impact: 'An agent reading the feed cannot tell if it can buy this item or where its page is, and may skip the listing.',
       suggested_fix: `Add ${missingRequired.join(' and ')} to the feed for this listing. Values come from you; the optimizer does not fill them.`,
-      value_fields: missingRequired, mismatch_fields: [], source: 'deterministic',
+      value_fields: missingRequired, source: 'deterministic',
     })
   }
   const ids = (['gtin', 'mpn', 'sku'] as const).filter((k) => identifier(row, k) === null)
@@ -386,9 +388,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
       key: 'p1.identifiers', pillar: 1, flag_type: 'missing', subtype: 'Missing', category: 3,
       title: `Missing identifier${ids.length > 1 ? 's' : ''}: ${ids.map((k) => k.toUpperCase()).join(' / ')}`,
       evidence: [`No ${ids.map((k) => k.toUpperCase()).join(', ')} field for this listing in the catalogue.`],
-      impact: 'Agents cannot cross-reference this product against marketplace catalogues and reviews.',
+      impact: 'An agent cannot cross-reference this product against marketplace catalogues and reviews, so it may skip it when comparing or match it to the wrong product.',
       suggested_fix: `Add ${ids.map((k) => k.toUpperCase()).join(' / ')} to the feed for this listing. Use the codes from your supplier; do not make them up.`,
-      value_fields: ids.map((k) => k.toUpperCase()), mismatch_fields: [], source: 'deterministic',
+      value_fields: ids.map((k) => k.toUpperCase()), source: 'deterministic',
     })
   }
   if (ld && ld.price !== null) {
@@ -398,9 +400,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
         key: 'p1.stale_price', pillar: 1, flag_type: 'contradiction', subtype: 'Stale / Mismatched', category: 1,
         title: `Page markup price ${ld.price} does not match the catalogue price ${feed}`,
         evidence: [`Schema.org Offer price: ${ld.price}`, `Catalogue price_cents: ${row.price_cents} (${money(row.price_cents)})`],
-        impact: 'Agents treat a price that differs between feed and page as stale and may disqualify the listing or mis-state the total.',
+        impact: 'An agent cannot tell which price is current, so it may treat the listing as stale and skip it, or state either price.',
         suggested_fix: 'Make the page markup price and the catalogue price the same. You decide which one is current.',
-        value_fields: [], mismatch_fields: ['Budget'], source: 'deterministic',
+        value_fields: [], source: 'deterministic',
       })
     }
   } else {
@@ -415,9 +417,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
       key: 'p2.attributes', pillar: 2, flag_type: 'missing', subtype: 'Missing', category: 2,
       title: `Missing structured attribute${missingAttrs.length > 1 ? 's' : ''}: ${missingAttrs.join(', ')}`,
       evidence: missingAttrs.map((k) => `${k}: no value in its structured field.`),
-      impact: 'Agents filter by explicit attributes and skip listings that do not state them.',
+      impact: 'An agent filtering by these attributes cannot match this listing, so it may skip it.',
       suggested_fix: `Fill ${missingAttrs.join(', ')} in their own fields.`,
-      value_fields: missingAttrs, mismatch_fields: missingAttrs.includes('size') ? ['Size'] : ['Product'], source: 'deterministic',
+      value_fields: missingAttrs, source: 'deterministic',
     })
   }
   const passedAttrs = structured.filter(([, v]) => present(v)).map(([k, v]) => `${k} ${k === 'size' ? `${v} cm` : v}`)
@@ -432,22 +434,28 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
         'colour field is empty for this listing.',
         ...(prose ? [`A colour appears only in prose: ${quote(prose)} (details). Prose does not count as a structured colour.`] : []),
       ],
-      impact: 'An agent filtering by colour cannot match this listing, and cannot confirm the colour a customer asked for.',
+      impact: 'An agent filtering by colour cannot match this listing or confirm its colour, so it may skip it or guess from prose.',
       suggested_fix: 'Add the colour to the colour field, using the same name you use across the catalogue.',
-      value_fields: ['colour'], mismatch_fields: ['Colour'], source: 'deterministic',
+      value_fields: ['colour'], source: 'deterministic',
     })
   }
-  const frontLoaded = brand !== null && norm(title).startsWith(norm(brand))
-  if (!frontLoaded) {
-    const proposed = [brand, title.replace(/\s*\d{4}\/\d{4}\s*$/, ''), present(row.size_cm) ? `${row.size_cm} cm` : null, colour, title.match(/\d{4}\/\d{4}\s*$/)?.[0] ?? null]
-      .filter(Boolean).join(' ')
+  // Front-loaded title: checked on the title as the store displays it, not on the name column alone.
+  const shown = displayedTitle(row)
+  if (brand !== null && norm(shown).startsWith(norm(brand))) {
+    notes[2].push(`Title front-loaded (Pass): the store displays ${quote(shown)}, brand first.`)
+  } else {
     flags.push({
       key: 'p2.title', pillar: 2, flag_type: 'missing', subtype: 'Buried', category: 2,
-      title: 'Title is not front-loaded with brand and key attributes',
-      evidence: [`title: ${quote(title)}`, brand ? `brand ${quote(brand)} is not at the start of the title; size${colour ? ' and colour are' : ' is'} not in it.` : 'No brand to front-load.'],
-      impact: 'Agents that match on the title see the brand and size late or not at all.',
-      suggested_fix: `Start the title with brand, product type and key attributes, built from your own fields, e.g. ${quote(proposed)}.`,
-      value_fields: [], mismatch_fields: [], source: 'deterministic',
+      title: 'Displayed title does not start with the brand',
+      evidence: [
+        `Displayed title: ${quote(shown)} (the store shows the brand line, then the name).`,
+        brand ? `It does not start with brand ${quote(brand)}.` : 'The brand field is empty, so the displayed title has no brand at the start.',
+      ],
+      impact: 'An agent matching on the title cannot see the brand first, so it may match the listing late, to the wrong brand, or skip it.',
+      suggested_fix: brand
+        ? `Start the displayed title with the brand ${quote(brand)}, followed by the product type and model.`
+        : 'Add the brand to the brand field so the displayed title starts with it. The value comes from you; the optimizer does not fill it.',
+      value_fields: brand ? [] : ['brand'], source: 'deterministic',
     })
   }
   const colourVar = inconsistency(vocab.colour, colour, (v) => norm(v.split(/[\s/]+/)[0] ?? v))
@@ -458,9 +466,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
       key: `p2.vocabulary.${attr}`, pillar: 2, flag_type: 'missing', subtype: 'Inconsistent', category: 2,
       title: `Inconsistent ${attr} vocabulary across the catalogue`,
       evidence: [`This listing: ${quote(value ?? '')}.`, `Same ${attr} spelled ${spellings.map((s) => `${quote(s.v)} (${s.n} listing${s.n > 1 ? 's' : ''})`).join(', ')}.`],
-      impact: 'Agents comparing listings treat different spellings as different values.',
+      impact: 'An agent comparing listings cannot tell these spellings mean the same thing, so it may filter this listing out or compare it inconsistently.',
       suggested_fix: `Use one spelling for this ${attr} across the catalogue, e.g. the most common ${quote(spellings[0].v)}. You choose the spelling.`,
-      value_fields: [], mismatch_fields: [], source: 'deterministic',
+      value_fields: [], source: 'deterministic',
     })
   }
   // Marketing copy vs formal terms. Deterministic keyword reading always runs; Spark's reading is added when available.
@@ -477,9 +485,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
         sparkConflict === true ? `Muse Spark: ${ctx.semantic.reason}` : ctx.semantic.source === 'rules-fallback'
           ? 'rules-fallback: keyword reading only (Spark deconstruction unavailable).' : `Keyword reading: the copy claims ${kindOfText(marketing)}, the terms say ${kindOfFormal(row.formal_returns)}.`,
       ],
-      impact: 'An agent repeats the marketing line to the customer, the customer confirms on it, and the order lands in Review Required or a return dispute.',
+      impact: 'An agent cannot tell which returns statement is true, so it may repeat the marketing line, skip the listing as ambiguous, or present it inconsistently.',
       suggested_fix: `Make the two agree. Either remove or correct ${quote(line, 60)} in the marketing copy, or change the formal terms if ${quote(terms, 60)} is wrong. You decide which is correct; the optimizer does not.`,
-      value_fields: [], mismatch_fields: ['Returns'], source: sparkConflict === true ? 'muse-spark' : ctx.semantic.source === 'rules-fallback' ? 'rules-fallback' : 'deterministic',
+      value_fields: [], source: sparkConflict === true ? 'muse-spark' : ctx.semantic.source === 'rules-fallback' ? 'rules-fallback' : 'deterministic',
     })
   } else if (marketing) {
     notes[2].push(keywordConflict === false || sparkConflict === false ? 'Marketing returns wording agrees with the formal terms.' : 'Marketing copy says nothing about returns.')
@@ -490,9 +498,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
       key: 'p2.size_conflict', pillar: 2, flag_type: 'contradiction', subtype: 'Contradiction', category: 1,
       title: `Marketing size ${d.size_cm} cm vs size field ${row.size_cm} cm`,
       evidence: [`Marketing copy states ${d.size_cm} cm.`, `size_cm field: ${row.size_cm}.`],
-      impact: 'An agent can tell the customer the wrong size.',
+      impact: 'An agent cannot tell which size is right, so it may state either one, skip the listing as ambiguous, or present it inconsistently.',
       suggested_fix: 'Make the marketing copy and the size field agree. You decide which is correct.',
-      value_fields: [], mismatch_fields: ['Size'], source: ctx.semantic.source,
+      value_fields: [], source: ctx.semantic.source,
     })
   }
   if (d && d.colour && colour && !norm(d.colour).includes(norm(colour)) && !norm(colour).includes(norm(d.colour))) {
@@ -500,9 +508,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
       key: 'p2.colour_conflict', pillar: 2, flag_type: 'contradiction', subtype: 'Contradiction', category: 1,
       title: `Marketing colour ${quote(d.colour)} vs colour field ${quote(colour)}`,
       evidence: [`Marketing copy states ${quote(d.colour)}.`, `colour field: ${quote(colour)}.`],
-      impact: 'An agent can confirm the wrong colour with the customer.',
+      impact: 'An agent cannot tell which colour is right, so it may state either one, skip the listing as ambiguous, or present it inconsistently.',
       suggested_fix: 'Make the marketing copy and the colour field agree. You decide which is correct.',
-      value_fields: [], mismatch_fields: ['Colour'], source: ctx.semantic.source,
+      value_fields: [], source: ctx.semantic.source,
     })
   }
 
@@ -523,9 +531,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
           'So no price, currency, stock status, reviews or returnPolicy is declared in markup.',
           ...(ctx.markup.has_breadcrumbs ? [] : ['No BreadcrumbList markup for category / variant navigation.']),
         ],
-        impact: `An agent that parses markup alone does not see the price or the return policy${row.formal_returns === 'final_sale' ? ' (Final Sale), which is how "Easy returns" gets repeated as fact' : ''}.`,
+        impact: 'An agent parsing markup alone does not see price or return policy, so it cannot compare this listing accurately.',
         suggested_fix: `Add Schema.org Product / Offer JSON-LD to the page as served, declaring price, currency, stock status and returnPolicy. Built from your catalogue values:\n${suggestedJsonLd(row, ctx.merchantName)}`,
-        value_fields: [], mismatch_fields: ['Returns', 'Budget'], source: 'deterministic',
+        value_fields: [], source: 'deterministic',
       })
     } else {
       const missing = [
@@ -538,9 +546,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
           key: 'p3.incomplete', pillar: 3, flag_type: 'missing', subtype: 'Incomplete', category: blocking.length ? 2 : 5,
           title: `Schema.org markup omits ${missing.join(', ')}`,
           evidence: [`${where}: Product markup found for this listing but it does not declare ${missing.join(', ')}.`],
-          impact: 'An agent parsing markup misses what is not declared.',
+          impact: 'An agent parsing markup alone does not see what is not declared, so it cannot compare this listing accurately on those fields.',
           suggested_fix: `Declare ${missing.join(', ')} in the Product / Offer markup.`,
-          value_fields: [], mismatch_fields: blocking.includes('returnPolicy') ? ['Returns'] : blocking.includes('price') ? ['Budget'] : [], source: 'deterministic',
+          value_fields: [], source: 'deterministic',
         })
       }
       const ldFinal = ld.returnPolicyCategory?.includes(RETURN_NOT_PERMITTED) ?? null
@@ -552,9 +560,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
           key: 'p3.contradictory', pillar: 3, flag_type: 'contradiction', subtype: 'Contradictory', category: 1,
           title: 'Schema.org markup contradicts the formal terms',
           evidence: contradictions,
-          impact: 'Agents trust markup; a contradiction there is repeated to the customer as fact.',
+          impact: 'An agent cannot tell whether the markup or the formal terms are right, so it may repeat the markup, skip the listing as ambiguous, or present it inconsistently.',
           suggested_fix: 'Make the markup say what the formal terms say. You decide which is correct.',
-          value_fields: [], mismatch_fields: ['Returns'], source: 'deterministic',
+          value_fields: [], source: 'deterministic',
         })
       }
       if (!missing.length && !contradictions.length) notes[3].push(`${where}: Product / Offer markup declares price, currency, stock status, reviews and returnPolicy.`)
@@ -582,7 +590,7 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
         `Delivery: standard ${row.standard_delivery_days} days${row.expedited_delivery_days != null ? `, expedited ${row.expedited_delivery_days} days` : ''} are in fields, not in a direct answer.`,
         'No Q&A field in the catalogue and no FAQPage / Question markup on the page.',
       ],
-      impact: 'Agents show an item price and a returns line the customer confirms on; the total and terms at checkout then differ (Budget and Returns mismatches).',
+      impact: 'An agent cannot answer these questions directly from the listing, so it may work out the total or terms itself, present them inconsistently, or skip the listing for one it can answer from.',
       suggested_fix: [
         'Add these question-and-answer pairs to the listing (totals computed from your own fields):',
         `Q: What size range is this for? A: ${row.size_cm} cm. Applicable range: [to be filled by merchant].`,
@@ -591,7 +599,7 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
         `Q: Is it returnable? A: ${returnsAnswer}`,
         `Q: When will it arrive? A: Standard ${row.standard_delivery_days} days${row.expedited_delivery_days != null ? `; expedited ${row.expedited_delivery_days} days` : ''}.`,
       ].join('\n'),
-      value_fields: ['Applicable size range'], mismatch_fields: ['Budget', 'Returns', 'Delivery', 'Size'], source: 'deterministic',
+      value_fields: ['Applicable size range'], source: 'deterministic',
     })
   } else {
     notes[4].push('Structured Q&A is present on the listing.')
@@ -606,9 +614,9 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
       key: 'p5.metadata', pillar: 5, flag_type: 'missing', subtype: trustMissing.map((m) => `Missing ${m}`).join(', '), category: 5,
       title: `No ${trustMissing.join(' or ')} on the listing`,
       evidence: trustMissing.map((m) => `${m}: not in the catalogue and not in page markup.`),
-      impact: 'Affects how confidently an agent recommends the listing; it does not block parsing.',
+      impact: 'An agent cannot confirm what other buyers say about this listing, so it may recommend it with less confidence or prefer a listing that shows reviews. It does not block parsing.',
       suggested_fix: 'Add reviews and Q&A metadata to the listing, if reviews exist. If there are none, leave it: never invent reviews.',
-      value_fields: [...(!reviews ? ['Review count', 'Average rating'] : []), ...(!qaMeta ? ['Q&A count'] : [])], mismatch_fields: [], source: 'deterministic',
+      value_fields: [...(!reviews ? ['Review count', 'Average rating'] : []), ...(!qaMeta ? ['Q&A count'] : [])], source: 'deterministic',
     })
   }
   const brandVar = inconsistency(vocab.brand, brand, norm)
@@ -617,16 +625,16 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
       key: 'p5.brand', pillar: 5, flag_type: 'missing', subtype: 'Inconsistent brand / seller_name', category: 5,
       title: 'Brand spelled differently across your catalogue',
       evidence: [`This listing: ${quote(brand ?? '')}.`, `Also spelled ${brandVar.map((s) => `${quote(s.v)} (${s.n})`).join(', ')}.`],
-      impact: 'Agents cross-referencing brand signals may treat these as different brands.',
+      impact: 'An agent cross-referencing brand signals cannot tell these spellings are one brand, so it may treat them as different brands.',
       suggested_fix: `Use one brand spelling, e.g. ${quote(brandVar[0].v)}. You choose.`,
-      value_fields: [], mismatch_fields: [], source: 'deterministic',
+      value_fields: [], source: 'deterministic',
     })
   }
   notes[5].push(`seller_name: ${quote(ctx.merchantName)} on every listing in this catalogue. External sentiment is out of scope and not checked.`)
 
   // ---- roll up per pillar ----
   const pillars: PillarCheck[] = ([1, 2, 3, 4, 5] as Pillar[]).map((p) => {
-    const mine = rankFlags(flags.filter((f) => f.pillar === p), ctx.history)
+    const mine = rankFlags(flags.filter((f) => f.pillar === p))
     const forced = p === 3 ? p3Result() : null
     const result: PillarResult = forced ?? (mine.some((f) => f.flag_type === 'contradiction') ? 'contradiction' : mine.length ? 'missing' : 'pass')
     const top = mine[0]
@@ -636,7 +644,7 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
 
   return {
     product_id: row.id,
-    product_name: `${brand ? `${brand} ` : ''}${title}`,
+    product_name: displayedTitle(row),
     brand,
     product_scope: text(row.category),
     size_cm: typeof row.size_cm === 'number' ? row.size_cm : null,
@@ -644,44 +652,18 @@ export function checkListing(row: Row, ctx: ListingContext): ListingResult {
     price_cents: row.price_cents,
     currency: text(row.currency) ?? 'USD',
     pillars,
-    flags: rankFlags(flags, ctx.history),
+    flags: rankFlags(flags),
     semantic: {
       source: ctx.semantic.source,
       label: ctx.semantic.source === 'muse-spark' ? 'Muse Spark deconstruction' : 'rules-fallback — deterministic check only, Spark deconstruction unavailable',
       reason: ctx.semantic.reason,
       deconstructed: ctx.semantic.deconstructed,
     },
-    order_history: ctx.history,
   }
 }
 
-// How many real Order check mismatches on this listing this flag relates to.
-export const causedCount = (f: Pick<Flag, 'mismatch_fields'>, h: OrderHistory) => f.mismatch_fields.reduce((n, k) => n + (h.fields[k] ?? 0), 0)
-
-// Section 8. Rank by category (contradictions first), then by real mismatches caused. A flag in categories 3-5 that has
-// already caused a real mismatch ranks just after category 2 (so Returns / total-visibility fixes come before identifier
-// fixes, as Section 8 says for Northwind). No score is invented: the key is the category and an observed count.
-export function rankFlags<T extends Pick<Flag, 'category' | 'mismatch_fields' | 'pillar'>>(flags: T[], h: OrderHistory): T[] {
-  const tier = (f: T) => (f.category <= 2 ? f.category : causedCount(f, h) > 0 ? 2.5 : f.category)
-  return [...flags].sort((a, b) => tier(a) - tier(b) || causedCount(b, h) - causedCount(a, h) || a.pillar - b.pillar)
-}
-
-// Aggregate Order check history per listing, from this merchant's receipts only. Counts and order refs, no customer data.
-export interface ReceiptFacts { order_ref: string | null; receipt_ref: string; product_id: string | null; mismatch_fields: string[] }
-export function historyByListing(receipts: ReceiptFacts[]): Map<string, OrderHistory> {
-  const out = new Map<string, OrderHistory>()
-  for (const r of receipts) {
-    if (!r.product_id || r.mismatch_fields.length === 0) continue
-    const h = out.get(r.product_id) ?? { orders: [], fields: {} }
-    h.orders.push(r.order_ref ?? r.receipt_ref)
-    for (const f of r.mismatch_fields) h.fields[f] = (h.fields[f] ?? 0) + 1
-    out.set(r.product_id, h)
-  }
-  return out
-}
-
-export function aggregateCounts(receipts: ReceiptFacts[]): Record<string, number> {
-  const c: Record<string, number> = {}
-  for (const r of receipts) for (const f of r.mismatch_fields) c[f] = (c[f] ?? 0) + 1
-  return c
+// Section 8 only: rank by category (1 contradictions, 2 missing fields that block parsing, 3 identifiers, 4 AEO answers,
+// 5 trust metadata), then by pillar. No order history or mismatch count is used, and no score is invented.
+export function rankFlags<T extends Pick<Flag, 'category' | 'pillar'>>(flags: T[]): T[] {
+  return [...flags].sort((a, b) => a.category - b.category || a.pillar - b.pillar)
 }

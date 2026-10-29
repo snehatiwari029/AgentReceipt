@@ -18,7 +18,8 @@
 --     rows have no day count, so I assumed 3 days.
 --   * expedited: Burton and Nitro = $60 (CSV) with an ASSUMED 2-day delivery. Other rows: none.
 --   * featured: Burton Spellbinder (proposed hero). It only drives the "Featured" badge.
---   * colour: Burton Spellbinder = 'Blue/Black' (your reply). The other 8 are empty: not in the CSV.
+--   * colour: Burton Spellbinder = 'Serpent' (confirmed live colour; the first draft of this file said 'Blue/Black', which
+--     seed_dashboard_demo.sql:38 overwrote). The other 8 are empty: not in the CSV.
 --   * image_url / image_id / image_hash stay empty until the image import runs.
 -- =====================================================================
 insert into products (
@@ -37,7 +38,7 @@ select m.id, v.name, v.brand, v.category, v.size_cm, v.colour, v.gender, v.style
        v.image_file, v.featured, v.sort_order
 from merchants m
 cross join (values
-  ('Spellbinder Snowboard 2026/2027', 'Burton', 'snowboard', 156, 'Blue/Black', 'Unisex', 'All-mountain / Freestyle',
+  ('Spellbinder Snowboard 2026/2027', 'Burton', 'snowboard', 156, 'Serpent', 'Unisex', 'All-mountain / Freestyle',
    'Directional Twin, PurePop Camber, Soft flex, Super Fly 800G Core, The Channel',
    44995, 0, 44995, 'final_sale', 'Final Sale', 0, 5, 6000, 2, 'burton-spellbinder.png', true, 1),
   ('T. Rice Orca Snowboard 2025/2026', 'Lib Tech', 'snowboard', 156, null, 'Unisex', 'All-mountain',

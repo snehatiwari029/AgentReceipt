@@ -72,7 +72,7 @@ describe('Shop', () => {
     mock.next = { data: NINE, error: null }
     render(<ShopApp />)
     const cards = await screen.findAllByTestId('product-card')
-    expect(within(cards[0]).getByText('156cm · Blue/Black')).toBeInTheDocument()
+    expect(within(cards[0]).getByText('156cm · Serpent')).toBeInTheDocument()
     expect(within(cards[1]).getByText('156cm')).toBeInTheDocument()
     expect(screen.queryByText(/null/)).not.toBeInTheDocument()
   })

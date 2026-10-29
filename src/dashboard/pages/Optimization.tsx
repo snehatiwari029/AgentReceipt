@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useRows } from '../data'
 import { Card, Empty, Live, PageTitle } from '../components/Panel'
 import { CATEGORY_LABELS, PILLAR_NAMES, type Category, type Pillar, type PillarResult } from '../../../supabase/functions/optimizer/checks'
-import { callOptimizer, rankSuggestions, STATUS_LABEL, type Scan, type ScanListing, type Suggestion } from '../optimizer'
+import { callOptimizer, filledIn, rankSuggestions, STATUS_LABEL, type Scan, type ScanListing, type Suggestion } from '../optimizer'
 
 // The dashboard is Northwind's (demo sign-in). Everything below is filtered to this merchant.
 const MERCHANT_NAME = 'Northwind Outfitters'
@@ -84,6 +84,9 @@ function Workspace({ merchant, scan, suggestions, onChanged }: {
   }, [scan, suggestions])
   const shown = current.filter((s) => matches(s, filters))
   const pendingShown = shown.filter((s) => s.status === 'pending')
+  // Approve All approves only what it can: a suggestion with an empty To-be-filled field stays pending.
+  const approvable = pendingShown.filter(filledIn)
+  const needValue = pendingShown.length - approvable.length
 
   async function scanNow() {
     setBusy('scan')
@@ -99,7 +102,7 @@ function Workspace({ merchant, scan, suggestions, onChanged }: {
   async function approveAll() {
     setBusy('all')
     setMessage(null)
-    const r = await callOptimizer({ action: 'approve_all', merchant_id: merchant.id, suggestion_ids: pendingShown.map((s) => s.id) })
+    const r = await callOptimizer({ action: 'approve_all', merchant_id: merchant.id, suggestion_ids: approvable.map((s) => s.id) })
     setBusy(null)
     if (r.type === 'approve_all') {
       setMessage({ ok: true, text: `Approved ${r.approved}. ${r.skipped_unfilled} left pending because a To-be-filled field is empty. Nothing in your store was changed.` })
@@ -124,16 +127,21 @@ function Workspace({ merchant, scan, suggestions, onChanged }: {
             </button>
             <div className="max-w-xs">
               <button
-                type="button" onClick={approveAll} disabled={busy !== null || pendingShown.length === 0}
+                type="button" onClick={approveAll} disabled={busy !== null || approvable.length === 0}
                 className="rounded-md border border-dash-edge px-4 py-2 text-sm font-semibold text-dash-ink hover:bg-dash-card-raised disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {busy === 'all' ? 'Approving…' : `Approve All (${pendingShown.length})`}
+                {busy === 'all' ? 'Approving…' : `Approve All (${approvable.length})`}
               </button>
               <p className="mt-1 text-xs text-dash-label">
                 Approves the pending suggestions shown below. It does not apply them: no listing, price, term or page
                 changes. You apply each fix in your store, then Scan Now verifies it. Suggestions with an empty
                 To-be-filled field stay pending.
               </p>
+              {needValue > 0 && (
+                <p className="mt-1 text-xs text-dash-attention" data-testid="approve-all-skipped">
+                  {needValue} more pending suggestion{needValue > 1 ? 's' : ''} shown need{needValue > 1 ? '' : 's'} a To-be-filled value first and will stay pending.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -310,10 +318,19 @@ function SuggestionCard({ s, merchantId, onChanged }: { s: Suggestion; merchantI
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(s.value_fields.map((f) => [f, s.merchant_values?.[f] ?? ''])))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tried, setTried] = useState(false) // Approve was clicked with a required field empty
+  const inputs = useRef<Record<string, HTMLInputElement | null>>({})
   const sev = SEVERITY[s.severity] ?? SEVERITY.lower
   const unfilled = s.value_fields.filter((f) => !values[f]?.trim())
 
   async function act(decision: 'approve' | 'reject') {
+    if (decision === 'approve' && unfilled.length > 0) {
+      // Nothing is sent: show which fields are missing, and put the cursor in the first one.
+      setTried(true)
+      setError(`Fill ${unfilled.join(', ')} before approving. The optimizer never fills a missing value.`)
+      inputs.current[unfilled[0]]?.focus()
+      return
+    }
     setBusy(true)
     setError(null)
     const r = await callOptimizer({ action: 'decide', merchant_id: merchantId, suggestion_id: s.id, decision, fix_text: fix, values })
@@ -349,12 +366,17 @@ function SuggestionCard({ s, merchantId, onChanged }: { s: Suggestion; merchantI
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {s.value_fields.map((f) => (
             <label key={f} className="text-sm">
-              <span className="text-dash-label">To be filled by merchant: {f}</span>
+              <span className="text-dash-label">To be filled by merchant: {f}{editable && <span className="text-dash-attention"> (required to approve)</span>}</span>
               <input
+                ref={(el) => { inputs.current[f] = el }}
                 value={values[f] ?? ''} disabled={!editable} placeholder="Empty — type your value"
+                aria-invalid={tried && unfilled.includes(f)}
                 onChange={(e) => setValues((v) => ({ ...v, [f]: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-dash-edge bg-dash-card px-2 py-1 text-dash-ink placeholder:text-dash-label"
+                className={`mt-1 w-full rounded-md border bg-dash-card px-2 py-1 text-dash-ink placeholder:text-dash-label ${
+                  tried && unfilled.includes(f) ? 'border-2 border-dash-violation' : 'border-dash-edge'
+                }`}
               />
+              {tried && unfilled.includes(f) && <span className="mt-1 block text-xs text-dash-violation">Required before approving.</span>}
             </label>
           ))}
         </div>
@@ -368,7 +390,7 @@ function SuggestionCard({ s, merchantId, onChanged }: { s: Suggestion; merchantI
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {editable && (
           <button
-            type="button" onClick={() => act('approve')} disabled={busy || unfilled.length > 0}
+            type="button" onClick={() => act('approve')} disabled={busy}
             className="rounded-md border border-dash-teal px-3 py-1.5 text-sm font-semibold text-dash-teal hover:bg-dash-card disabled:cursor-not-allowed disabled:opacity-50"
           >
             Approve
@@ -382,7 +404,6 @@ function SuggestionCard({ s, merchantId, onChanged }: { s: Suggestion; merchantI
             Reject
           </button>
         )}
-        {editable && unfilled.length > 0 && <span className="text-xs text-dash-attention">Fill {unfilled.join(', ')} to approve.</span>}
         {editable && <span className="text-xs text-dash-label">Approving records your decision. It does not change your listing.</span>}
       </div>
     </li>

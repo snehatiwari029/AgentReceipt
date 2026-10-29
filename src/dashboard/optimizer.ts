@@ -45,6 +45,11 @@ export function rankSuggestions<T extends Pick<Suggestion, 'category' | 'pillar'
   return [...list].sort((a, b) => a.category - b.category || a.pillar - b.pillar)
 }
 
+// Same rule as the function's `filled`: every To-be-filled field has a saved, non-blank value. The function enforces it;
+// the page uses it so Approve All's count is what it will actually approve.
+export const filledIn = (s: Pick<Suggestion, 'value_fields' | 'merchant_values'>) =>
+  s.value_fields.every((f) => (s.merchant_values?.[f] ?? '').trim() !== '')
+
 export const STATUS_LABEL: Record<Suggestion['status'], string> = {
   pending: 'Pending your decision',
   approved: 'Approved — awaiting merchant application',

@@ -254,22 +254,52 @@ describe('Optimization for Agents', () => {
     expect(await screen.findByText(/2 left pending because a To-be-filled field is empty. Nothing in your store was changed./)).toBeInTheDocument()
   })
 
-  it('a missing field has an empty To-be-filled input; Approve stays disabled until the merchant types a value', async () => {
+  it('Approve with an empty To-be-filled field sends nothing and outlines each empty field in red', async () => {
     const user = userEvent.setup()
     const w = await scanned()
     open('/dashboard/optimization')
     const spell = (await screen.findAllByTestId('optimizer-listing'))[0]
     const ids = within(spell).getAllByTestId('optimizer-suggestion').find((el) => el.textContent?.includes('Missing identifiers'))!
-    const gtin = within(ids).getByLabelText('To be filled by merchant: GTIN')
-    expect(gtin).toHaveValue('')
-    expect(within(ids).getByRole('button', { name: 'Approve' })).toBeDisabled()
-    await user.type(gtin, '0123')
-    await user.type(within(ids).getByLabelText('To be filled by merchant: MPN'), 'M1')
-    await user.type(within(ids).getByLabelText('To be filled by merchant: SKU'), 'S1')
+    const field = (f: string) => within(ids).getByLabelText(new RegExp(`^To be filled by merchant: ${f}`))
+    expect(field('GTIN')).toHaveValue('')
+    expect(field('GTIN')).toHaveAccessibleName('To be filled by merchant: GTIN (required to approve)')
+    expect(field('GTIN')).not.toHaveAttribute('aria-invalid', 'true') // not red before the merchant tries
+
+    await user.type(field('MPN'), 'M1')
     await user.click(within(ids).getByRole('button', { name: 'Approve' }))
-    const id = w.find(BURTON, 'p1.identifiers').id
+    expect(calls).toHaveLength(0) // nothing sent
+    expect(within(ids).getByRole('alert')).toHaveTextContent('Fill GTIN, SKU before approving. The optimizer never fills a missing value.')
+    for (const f of ['GTIN', 'SKU']) {
+      expect(field(f)).toHaveAttribute('aria-invalid', 'true')
+      expect(field(f)).toHaveClass('border-dash-violation')
+    }
+    expect(field('MPN')).not.toHaveClass('border-dash-violation')
+    expect(field('GTIN')).toHaveFocus()
+    expect(within(ids).getAllByText('Required before approving.')).toHaveLength(2)
+
+    await user.type(field('GTIN'), '0123')
+    expect(field('GTIN')).not.toHaveClass('border-dash-violation') // red clears as soon as it is filled
+    await user.type(field('SKU'), 'S1')
+    await user.click(within(ids).getByRole('button', { name: 'Approve' }))
     expect(calls).toHaveLength(1)
-    expect(calls[0].body).toMatchObject({ action: 'decide', suggestion_id: id, decision: 'approve', values: { GTIN: '0123', MPN: 'M1', SKU: 'S1' } })
+    expect(calls[0].body).toMatchObject({ action: 'decide', suggestion_id: w.find(BURTON, 'p1.identifiers').id, decision: 'approve', values: { GTIN: '0123', MPN: 'M1', SKU: 'S1' } })
+  })
+
+  it('Approve All counts only what it will approve; suggestions needing a value are counted separately and not sent', async () => {
+    const user = userEvent.setup()
+    const w = await scanned()
+    open('/dashboard/optimization')
+    await screen.findAllByTestId('optimizer-listing')
+    const pending = w.tables.optimizer_suggestions
+    const ready = pending.filter((s) => s.value_fields.length === 0)
+    expect(screen.getByRole('button', { name: /^Approve All/ })).toHaveTextContent(`Approve All (${ready.length})`)
+    expect(screen.getByTestId('approve-all-skipped')).toHaveTextContent(`${pending.length - ready.length} more pending suggestions shown need a To-be-filled value first and will stay pending.`)
+
+    await user.selectOptions(screen.getByLabelText('Flag type'), 'missing') // the count follows the filter
+    const readyMissing = ready.filter((s) => s.flag_type === 'missing')
+    expect(screen.getByRole('button', { name: /^Approve All/ })).toHaveTextContent(`Approve All (${readyMissing.length})`)
+    await user.click(screen.getByRole('button', { name: /^Approve All/ }))
+    expect(new Set(calls[0].body.suggestion_ids as string[])).toEqual(new Set(readyMissing.map((s) => s.id)))
   })
 
   it('filters by pillar and flag type only', async () => {

@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { NINE } from './fixtures'
 import { fakeClient, mock, type Result } from './mockSupabase'
 import { buildSeed, MERCHANT_ID } from '../../scripts/seed-dashboard-demo'
+import { computeEntryHash } from '../../supabase/functions/_shared/hash'
 
 vi.mock('../shared/supabase', () => ({ supabase: fakeClient }))
 
@@ -196,7 +197,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     const packEl = within(detail).getByTestId('evidence-pack')
     expect([...packEl.querySelectorAll('[data-pack-section]')].map((x) => x.getAttribute('data-pack-section'))).toEqual(['dispute', 'action', 'grant', 'terms', 'delivery', 'layer2', 'verdict', 'receipt', 'eligibility'])
     expect(within(detail).getByText(/This dispute was filed under Visa\. The pack below is rebuilt in the Mastercard format/)).toBeInTheDocument()
-    expect(within(packEl).getByTestId('pack-record')).toHaveTextContent('No pack generation recorded for the Mastercard format yet.')
+    expect(within(packEl).getByTestId('pack-record')).toHaveTextContent(/It is not yet recorded as a generated pack for the Mastercard format: Generate pack records this version in the chain\. Opening the page writes nothing\./)
     expect(within(packEl).getByTestId('pack-notes')).toHaveTextContent('Registration status not in record — confirm with acquirer.')
   })
 
@@ -293,6 +294,59 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
       vi.unstubAllEnvs()
       vi.unstubAllGlobals()
     }
+  })
+
+  // The live 13422 record (left as it is, option C): no filed processor, code, claim type or dispute date; dispute and
+  // merchant entries on Oct 26 with times only; no shipment record. Rebuilt here on a valid hash chain.
+  async function liveShape() {
+    const receipts = SEEDED.receipts.data as Receipt[]
+    const receipt = receipts.find((r) => r.order_ref === '13422')!
+    const dispute = { id: 'd-live', receipt_id: receipt.id, reason: 'Claimed agent overstep — agent exceeded budget / bought outside grant', opened_at: '2026-10-26T18:30:00+00:00', created_at: '2026-10-26T18:30:00+00:00' }
+    let prev = receipt.entry_hash as string
+    const events = []
+    const old = [['opened', null, {}, '18:30'], ['recommendation', 'AgentReceipt (automatic)', { recommendation: 'represent' }, '18:31'], ['represented', 'Northwind Outfitters', { receipt_ref: 'AR-2026-0043' }, '18:40'], ['outcome_won', 'Northwind Outfitters', { receipt_ref: 'AR-2026-0043' }, '18:50']] as const
+    for (const [i, [type, by, basis, hhmm]] of old.entries()) {
+      const row = { id: `e-live-${i}`, dispute_id: 'd-live', event_type: type, decided_by: by, basis, created_at: `2026-10-26T${hhmm}:00+00:00`, chain_seq: (receipt.chain_seq as number) + 1 + i, prev_hash: prev }
+      const entry_hash = await computeEntryHash(prev, row)
+      events.push({ ...row, entry_hash })
+      prev = entry_hash
+    }
+    const chain = (SEEDED.chain_entries.data as { chain_seq: number; entry_hash: string }[]).filter((c) => c.chain_seq <= (receipt.chain_seq as number)).concat(events.map((e) => ({ chain_seq: e.chain_seq, entry_hash: e.entry_hash })))
+    mock.tables = { ...SEEDED, disputes: { data: [dispute], error: null }, dispute_events: { data: events, error: null }, shipments: { data: [], error: null }, chain_entries: { data: chain, error: null } }
+  }
+
+  it('live 13422 (unfiled fields): chronological timeline, one dispute-date answer, no "filed as Visa", plain claim reading, Layer 2 statement once', async () => {
+    const user = userEvent.setup()
+    await liveShape()
+    open('/dashboard/disputes')
+    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    const detail = await screen.findByTestId('dispute-detail')
+    expect(await within(detail).findByTestId('tamper-line')).toHaveTextContent('Receipt chain verified — tamper check passed')
+    // 1. chronological: the order before the dispute that it caused
+    const titles = [...within(detail).getByTestId('timeline').querySelectorAll('li > span:first-child')].map((x) => x.textContent)
+    expect(titles).toEqual(['Grant sealed', 'Action', 'Verdict', 'Merchant review', 'Shipment', 'Dispute filed', 'Fought (submitted to acquirer)', 'Won'])
+    // 4. one answer for the dispute date: not filed, recorded on Oct 26 — in the header, the timeline and the pack
+    expect(within(detail).getByTestId('dispute-date')).toHaveTextContent('Dispute date not filed — recorded in AgentReceipt 2026-10-26')
+    const filedStep = [...within(detail).getByTestId('timeline').querySelectorAll('li')].find((li) => li.textContent!.startsWith('Dispute filed'))!
+    expect(filedStep).toHaveTextContent(/^Dispute filed\s*dispute date not filed · recorded 2026-10-26/)
+    // steps with no record show no date at all, never a borrowed one
+    for (const name of ['Merchant review', 'Shipment']) {
+      const li = [...within(detail).getByTestId('timeline').querySelectorAll('li')].find((x) => x.querySelector('span')!.textContent === name)!
+      expect(li.querySelectorAll('span')[1]).toHaveTextContent(/^no record$/)
+    }
+    expect(within(detail).getByTestId('evidence-pack')).toHaveTextContent('Not filed. The dispute was recorded in AgentReceipt on 2026-10-26.')
+    expect(detail.textContent).not.toMatch(/Dispute filed 2026-10-26/)
+    // 2. the viewed format is never presented as the filed processor
+    expect(within(detail).getByTestId('format-note')).toHaveTextContent('Processor not filed. Pack format: Visa — view only.')
+    expect(within(detail).getByTestId('pack-explanation')).toHaveTextContent('shown in Visa field order. Processor and reason code are not filed; Visa is only the format you are viewing.')
+    expect(detail.textContent).not.toMatch(/filed as Visa/)
+    // 3. the agent-overstep claim gets its plain reading
+    expect(within(detail).getByTestId('claim-vs-record')).toHaveTextContent('Customer says the agent bought outside what they authorised.')
+    expect(detail.textContent).not.toMatch(/no plain-language reading for this claim type/)
+    // 5. inside the pack, the Layer 2 statement appears once (the timeline has its own step)
+    expect(within(detail).getByTestId('evidence-pack').textContent!.match(/No merchant review record\. The order was Pass at Order check, so no review was flagged\./g)).toHaveLength(1)
+    // the old recommendation entry is never shown
+    expect(detail.textContent).not.toMatch(/recommend/i)
   })
 
   it('Agent orders: a Review Required order offers "Record merchant action" (Layer 2); a Pass order does not', async () => {

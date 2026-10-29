@@ -41,6 +41,14 @@ const CLAIM_PLAIN: Record<ClaimType, string> = {
   misrepresentation: 'Customer says they were misled about the terms of the purchase.',
   other: 'See the claim as filed; AgentReceipt has no plain-language reading for this claim type.',
 }
+// A dispute recorded before claim types existed has no claim type. Its claim text is still read, narrowly: only the
+// agent-overstep wording gets the plain reading. Anything else says the claim type was not filed.
+const OVERSTEP = /agent overstep|outside (the )?grant|exceeded (the )?budget|outside what (they|the customer) authori[sz]ed/i
+export function claimPlain(claimType: ClaimType | null, asFiled: string): string {
+  if (claimType) return CLAIM_PLAIN[claimType]
+  if (OVERSTEP.test(asFiled)) return CLAIM_PLAIN.agent_outside_grant
+  return 'Claim type not filed; see the claim as filed.'
+}
 
 // Reason codes / conditions: a plain-language translation of the code AS FILED. Nothing here selects, suggests or
 // corrects a code. `fits` lists the claim types this code describes; when a claim type is outside it, the pack shows
@@ -426,7 +434,7 @@ function claimItems(input: PackInput): Item[] {
     present('Processor as filed', filed ? PROCESSOR_LABEL[filed] : null),
     present('Acquirer / channel', s(d.channel), { obtain_from: ACQUIRER }),
     present('Reason code / condition as filed', s(d.reason_code), { obtain_from: ACQUIRER }),
-    present('Dispute date', date(d.dispute_date), { obtain_from: ACQUIRER }),
+    present('Dispute date', date(d.dispute_date), { obtain_from: ACQUIRER, ...(date(d.opened_at) ? { note: `Not filed. The dispute was recorded in AgentReceipt on ${date(d.opened_at)}.` } : {}) }),
     present('Dispute amount', money(n(d.dispute_amount_cents)), { obtain_from: ACQUIRER }),
     present('Processor reference', s(d.processor_reference), { obtain_from: ACQUIRER, note: 'Not in AgentReceipt record — obtain from acquirer.' }),
   ]
@@ -540,13 +548,17 @@ function collectNeeds(processor: Processor, sections: Section[]): Need[] {
 }
 
 // ---------- texts ----------
-export function templateTexts(p: { processor_label: string; order_ref: string | null; receipt_ref: string; claim: Pack['claim']; needs: Need[] }): Texts {
-  const cond = p.claim.condition_as_filed ? `${p.processor_label} ${p.claim.condition_as_filed}` : `${p.processor_label} (reason code not filed)`
+export function templateTexts(p: { processor_label: string; filed_label: string | null; order_ref: string | null; receipt_ref: string; claim: Pack['claim']; needs: Need[] }): Texts {
+  const code = p.claim.condition_as_filed ? ` ${p.claim.condition_as_filed}` : ' (reason code not filed)'
+  // The format being viewed is never presented as the processor the dispute was filed under.
+  const filed = p.filed_label
+    ? `The dispute was filed under ${p.filed_label}${code}.`
+    : `Processor and reason code are not filed; ${p.processor_label} is only the format you are viewing.`
   const m = p.needs.length
   return {
-    claim_plain: p.claim.claim_type ? CLAIM_PLAIN[p.claim.claim_type] : CLAIM_PLAIN.other,
+    claim_plain: claimPlain(p.claim.claim_type, p.claim.as_filed),
     explanation:
-      `This pack lays out the AgentReceipt record for order ${p.order_ref ?? p.receipt_ref} (${p.receipt_ref}) in the ${p.processor_label} field order, for the dispute filed as ${cond}. ` +
+      `This pack lays out the AgentReceipt record for order ${p.order_ref ?? p.receipt_ref} (${p.receipt_ref}), shown in ${p.processor_label} field order. ${filed} ` +
       (m ? `${m} ${m === 1 ? 'item is' : 'items are'} not in the record; each one names where to obtain it. ` : 'Every item this format lists is in the record. ') +
       'You decide with your acquirer whether to fight or concede.',
   }
@@ -630,7 +642,7 @@ export async function buildPack(input: PackInput): Promise<Pack> {
     terms: termsItems(receipt),
     receipt: receiptItems(receipt, input.gate),
     verdict: verdictRows(receipt),
-    layer2: l2.items.length ? l2.items : [{ label: 'Merchant review record', value: l2.statement, status: 'present' }],
+    layer2: l2.items,
     claimItems: claimItems(input),
   }
   const t = processor === 'visa' ? visa(ctx) : mastercard(ctx)
@@ -641,7 +653,7 @@ export async function buildPack(input: PackInput): Promise<Pack> {
     needs.push({ item: 'Confirmation that this order shipped', why: 'AgentReceipt recorded this order as held for review, with no release record and no shipment record.', obtain_from: MERCHANT, merchant_input: true })
   }
   const base = {
-    processor_label: PROCESSOR_LABEL[processor], order_ref: s(receipt.order_ref), receipt_ref: s(receipt.receipt_ref) ?? '', claim, sections: t.sections, needs,
+    processor_label: PROCESSOR_LABEL[processor], filed_label: filed ? PROCESSOR_LABEL[filed] : null, order_ref: s(receipt.order_ref), receipt_ref: s(receipt.receipt_ref) ?? '', claim, sections: t.sections, needs,
   }
   let texts = templateTexts(base)
   let textSource: TextSource = 'rules-fallback'

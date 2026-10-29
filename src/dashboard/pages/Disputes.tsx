@@ -86,6 +86,8 @@ function usePack(d: Dispute, receipt: Receipt, merchant: Merchant, load: Load, p
 const short = (h: string | null | undefined) => (h ? `${h.slice(0, 15)}…${h.slice(-6)}` : 'none')
 const day = (v: string | null | undefined) => (v ? v.slice(0, 10) : null)
 const disputeDay = (d: Dispute) => d.dispute_date ?? d.opened_at.slice(0, 10)
+// The dispute date as filed, or, when it was not filed, when the dispute was recorded in AgentReceipt (said as such).
+const disputeDateLabel = (d: Dispute) => (d.dispute_date ? d.dispute_date : `dispute date not filed · recorded ${d.opened_at.slice(0, 10)}`)
 const filedProcessor = (d: Dispute): Processor | null => (d.processor === 'visa' || d.processor === 'mastercard' ? d.processor : null)
 
 const INPUT = 'w-full rounded-md border border-dash-edge bg-dash-card-raised px-2 py-1.5 text-sm text-dash-ink'
@@ -412,15 +414,20 @@ function DisputeDetail({ row, merchant, reload, onChanged, autoGenerate, clearAu
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-lg font-bold text-dash-ink">Order {receipt.order_ref ?? '–'} · {receipt.receipt_ref}</p>
-            <p className="text-sm text-dash-body">Dispute filed {d.dispute_date ?? 'date not in record'} · {filed ? PROCESSOR_LABEL[filed] : 'processor not filed'} {d.reason_code ?? ''}</p>
+            <p className="text-sm text-dash-body" data-testid="dispute-date">{d.dispute_date ? `Dispute filed ${d.dispute_date}` : `Dispute date not filed — recorded in AgentReceipt ${d.opened_at.slice(0, 10)}`} · {filed ? PROCESSOR_LABEL[filed] : 'processor not filed'} {d.reason_code ?? ''}</p>
           </div>
           <label className="text-sm">
             <span className={LABEL}>Pack format</span>
             <select className={INPUT} value={processor} onChange={(e) => { setProcessor(e.target.value as Processor); setOverride(null) }} aria-label="Pack format">
-              {PROCESSORS.map((p) => <option key={p} value={p}>{PROCESSOR_LABEL[p]}{p === filed ? ' (as filed)' : ''}</option>)}
+              {PROCESSORS.map((p) => <option key={p} value={p}>{PROCESSOR_LABEL[p]}{p === filed ? ' (as filed)' : ' — view only'}</option>)}
             </select>
           </label>
         </div>
+        {!filed && (
+          <p className="mt-2 text-sm font-semibold text-dash-attention" data-testid="format-note">
+            Processor not filed. Pack format: {PROCESSOR_LABEL[processor]} — view only. This is the field order you are viewing, not the processor the dispute was filed under.
+          </p>
+        )}
         {filed && processor !== filed && (
           <p className="mt-2 text-sm font-semibold text-dash-attention">
             This dispute was filed under {PROCESSOR_LABEL[filed]}. The pack below is rebuilt in the {PROCESSOR_LABEL[processor]} format, with its own field order and checklist.
@@ -494,47 +501,56 @@ function ClaimVsRecord({ pack }: { pack: Pack }) {
   )
 }
 
-type Step = { at: string; title: string; detail: string; source: string }
+// A step's own date (or timestamp), and its place in the order's life: grant 0, action 1, verdict 2, merchant review 3,
+// shipment 4, dispute filed 5, pack and merchant entries 6. Steps are sorted by day, then by that place, then by time,
+// so records that carry only a date never jump ahead of same-day records that carry a time.
+type Step = { at: string; rank: number; title: string; detail: string; source: string; dateLabel?: string }
 
 function Timeline({ row, data }: { row: ListRow; data: Loaded }) {
   const { d, receipt } = row
   const steps: Step[] = []
   const g = data.grant
-  if (g) steps.push({ at: String(g.confirmed_at ?? ''), title: 'Grant sealed', detail: `Budget ${num(g.amount_max_cents) === null ? '–' : formatMoney(num(g.amount_max_cents) as number)} max · product scope ${str(g.product_scope) ?? 'unspecified'}`, source: `Grant record ${short(str(g.entry_hash))}` })
+  if (g) steps.push({ at: String(g.confirmed_at ?? ''), rank: 0, title: 'Grant sealed', detail: `Budget ${num(g.amount_max_cents) === null ? '–' : formatMoney(num(g.amount_max_cents) as number)} max · product scope ${str(g.product_scope) ?? 'unspecified'}`, source: `Grant record ${short(str(g.entry_hash))}` })
   const a = data.action
   if (a) {
     const det = (a.detail as Row) ?? {}
-    steps.push({ at: String(det.sealed_at ?? a.created_at ?? ''), title: 'Action', detail: `${str(det.product_name) ?? '–'} · total ${num(det.total_cents) === null ? '–' : formatMoney(num(det.total_cents) as number)}`, source: `Action record ${short(str(a.entry_hash))}` })
+    steps.push({ at: String(det.sealed_at ?? a.created_at ?? ''), rank: 1, title: 'Action', detail: `${str(det.product_name) ?? '–'} · total ${num(det.total_cents) === null ? '–' : formatMoney(num(det.total_cents) as number)}`, source: `Action record ${short(str(a.entry_hash))}` })
   }
-  steps.push({ at: receipt.sealed_at ?? '', title: 'Verdict', detail: `${receipt.decision ? { pass: 'Pass', review_required: 'Review Required', hold_suspicion: 'Hold for Suspicion' }[receipt.decision] : 'No decision'} · ${receipt.problems_found} problems`, source: `Receipt ${receipt.receipt_ref}` })
+  steps.push({ at: receipt.sealed_at ?? '', rank: 2, title: 'Verdict', detail: `${receipt.decision ? { pass: 'Pass', review_required: 'Review Required', hold_suspicion: 'Hold for Suspicion' }[receipt.decision] : 'No decision'} · ${receipt.problems_found} problems`, source: `Receipt ${receipt.receipt_ref}` })
   if (data.reviews.length === 0) {
     const flagged = receipt.decision === 'review_required' || receipt.decision === 'hold_suspicion'
-    steps.push({ at: receipt.sealed_at ?? '', title: 'Merchant review', detail: flagged ? 'No merchant review record.' : 'No merchant review record. The order was Pass at Order check, so no review was flagged.', source: 'Merchant review records' })
+    steps.push({ at: receipt.sealed_at ?? '', rank: 3, title: 'Merchant review', dateLabel: 'no record', detail: flagged ? 'No merchant review record.' : 'No merchant review record. The order was Pass at Order check, so no review was flagged.', source: 'Merchant review records' })
   }
-  for (const r of data.reviews) steps.push({ at: r.recorded_at, title: 'Merchant review (recorded at review time)', detail: `${r.action_taken.replace(/_/g, ' ')} · ${r.method} · ${r.release_decision === 'released' ? 'released for shipment' : 'not released'}`, source: `Merchant review record ${short(r.entry_hash)}` })
+  for (const r of data.reviews) steps.push({ at: r.recorded_at, rank: 3, title: 'Merchant review (recorded at review time)', detail: `${r.action_taken.replace(/_/g, ' ')} · ${r.method} · ${r.release_decision === 'released' ? 'released for shipment' : 'not released'}`, source: `Merchant review record ${short(r.entry_hash)}` })
   if (data.shipment) {
-    steps.push({ at: `${data.shipment.shipped_on}T00:00:00Z`, title: 'Shipped', detail: `Shipped ${data.shipment.shipped_on}${data.shipment.delivered_on ? ` · delivered ${data.shipment.delivered_on}` : ' · delivery date not in record'} · delivery proof ${data.shipment.delivery_proof_ref ? 'present' : 'missing'}`, source: data.shipment.source })
+    steps.push({ at: data.shipment.shipped_on, rank: 4, title: 'Shipped', detail: `Shipped ${data.shipment.shipped_on}${data.shipment.delivered_on ? ` · delivered ${data.shipment.delivered_on}` : ' · delivery date not in record'} · delivery proof ${data.shipment.delivery_proof_ref ? 'present' : 'missing'}`, source: data.shipment.source })
   } else {
-    steps.push({ at: receipt.sealed_at ?? '', title: 'Shipment', detail: 'Shipment date not in record. Delivery proof missing.', source: 'No shipment record' })
+    steps.push({ at: receipt.sealed_at ?? '', rank: 4, title: 'Shipment', dateLabel: 'no record', detail: 'Shipment date not in record. Delivery proof missing.', source: 'No shipment record' })
   }
-  steps.push({ at: `${d.dispute_date ?? d.opened_at.slice(0, 10)}T00:00:01Z`, title: 'Dispute filed', detail: `${d.reason} · ${d.processor ? PROCESSOR_LABEL[d.processor] : 'processor not filed'} ${d.reason_code ?? ''} · amount ${d.dispute_amount_cents == null ? 'not in record' : formatMoney(d.dispute_amount_cents)}`, source: 'Dispute record (as filed)' })
+  steps.push({
+    at: d.dispute_date ?? d.opened_at, rank: 5, title: 'Dispute filed', dateLabel: disputeDateLabel(d),
+    detail: `${d.reason} · ${d.processor ? PROCESSOR_LABEL[d.processor] : 'processor not filed'} ${d.reason_code ?? ''} · amount ${d.dispute_amount_cents == null ? 'not in record' : formatMoney(d.dispute_amount_cents)}`,
+    source: d.dispute_date ? 'Dispute record (as filed)' : 'Dispute record: the filed dispute date is not in the record; the date shown is when it was recorded in AgentReceipt',
+  })
   for (const e of shownEvents(data.events)) {
     if (e.event_type === 'opened') continue
     const date = typeof e.basis.date === 'string' ? e.basis.date : null
-    const at = date ? `${date}T00:00:02Z` : String(e.basis.generated_at ?? e.basis.recorded_at ?? e.created_at ?? '')
+    const at = date ?? String(e.basis.generated_at ?? e.basis.recorded_at ?? e.created_at ?? '')
     const detail = e.event_type === 'pack_generated'
       ? `${PROCESSOR_LABEL[e.basis.processor as Processor] ?? ''} format · ${e.basis.text_source === 'muse-spark' ? 'Muse Spark texts' : 'rules-fallback texts'} · version ${short(e.basis.pack_hash as string)}`
       : [date ? `Date ${date}` : null, typeof e.basis.reason === 'string' ? `“${e.basis.reason}”` : null, e.decided_by ? `by ${e.decided_by}` : null].filter(Boolean).join(' · ')
-    steps.push({ at, title: DISPUTE_STATUS[e.event_type], detail, source: `Dispute entry ${short(e.entry_hash)}` })
+    steps.push({ at, rank: 6, title: DISPUTE_STATUS[e.event_type], detail, source: `Dispute entry ${short(e.entry_hash)}` })
   }
-  steps.sort((x, y) => x.at.localeCompare(y.at))
+  const order = steps.map((s, i) => ({ s, i }))
+  order.sort((x, y) => x.s.at.slice(0, 10).localeCompare(y.s.at.slice(0, 10)) || x.s.rank - y.s.rank || x.s.at.localeCompare(y.s.at) || x.i - y.i)
+  steps.splice(0, steps.length, ...order.map((o) => o.s))
   return (
     <Block title="Timeline" testid="timeline">
       <ol className="flex flex-col gap-2 border-l border-dash-edge pl-4 text-sm">
         {steps.map((s, i) => (
           <li key={i}>
             <span className="font-semibold text-dash-ink">{s.title}</span>
-            <span className="ml-2 text-xs text-dash-label">{s.at.slice(0, 10)}</span>
+            <span className="ml-2 text-xs text-dash-label">{s.dateLabel ?? s.at.slice(0, 10)}</span>
             <span className="block text-dash-body">{s.detail}</span>
             <span className="block text-xs text-dash-label">Source: {s.source}</span>
           </li>
@@ -577,7 +593,7 @@ function PackView({ pack, events, busy, onGenerate, merchant, dispute, onChanged
           ? rec.basis.pack_hash === pack.pack_hash
             ? `Matches the pack generation record of ${String(rec.basis.generated_at ?? rec.created_at ?? '').slice(0, 10)}.`
             : `Differs from the pack generation record of ${String(rec.basis.generated_at ?? rec.created_at ?? '').slice(0, 10)}: the record or texts changed after that pack was generated. Regenerate to record this version.`
-          : `No pack generation recorded for the ${pack.processor_label} format yet.`}
+          : `This pack is built from the record each time you open it; Download JSON and Printable pack give exactly this version (the hash above). It is not yet recorded as a generated pack for the ${pack.processor_label} format: Generate pack records this version in the chain. Opening the page writes nothing.`}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={BTN} onClick={() => download(`${name}.json`, JSON.stringify(packExport(pack, events), null, 2), 'application/json')}>Download JSON</button>

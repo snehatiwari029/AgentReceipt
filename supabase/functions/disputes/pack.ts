@@ -116,9 +116,12 @@ export type PackInput = {
 }
 
 export type ItemStatus = 'present' | 'missing' | 'unspecified'
-export type Item = { label: string; value: string | null; status: ItemStatus; obtain_from?: string; note?: string }
+// origin 'sample': a dispute-notice value shown in the sample example (never stored, never filed). Absent = the value
+// comes from the AgentReceipt record or the dispute as recorded.
+export type Item = { label: string; value: string | null; status: ItemStatus; obtain_from?: string; note?: string; origin?: 'sample' }
 export type VerdictRow = { field: string; grant: string | null; merchant_terms: string | null; actual: string | null; result: string; cause: string | null; next_action_who: string | null; key?: string }
-export type Section = { key: string; title: string; items: Item[]; verdict?: VerdictRow[]; footer?: string }
+// tone 'sample': the section holds sample notice values (shown once, as an orange section accent). Otherwise 'record'.
+export type Section = { key: string; title: string; tone?: 'record' | 'sample'; items: Item[]; verdict?: VerdictRow[]; footer?: string }
 export type Need = { item: string; why: string; obtain_from: string; merchant_input: boolean }
 export type ElementResult = 'match' | 'mismatch' | 'unspecified' | 'not_in_record' | 'in_record'
 export type Element = { element: string; claim: string; record: string; result: ElementResult }
@@ -132,6 +135,7 @@ export type Pack = {
   order_ref: string | null
   receipt_ref: string
   merchant: string
+  sample: boolean // the sample example: a demo view over a real order's record, never a filed dispute
   trusted: boolean
   claim: {
     as_filed: string
@@ -165,6 +169,8 @@ export const CE3_LINE = 'CE3.0 eligibility cannot be determined from AgentReceip
 export const MC_REGISTRATION_LINE = 'Registration status not in record — confirm with acquirer.'
 export const CODE_FLAG = 'Code does not match claim — confirm with acquirer.'
 export const NO_REVIEW = 'No merchant review record.'
+export const LEGEND = 'Blue = real data from the transaction record. Orange = sample data — what we would receive from merchant dispute records when the store is connected.'
+export const SAMPLE_LABEL = 'Sample example — not a filed dispute. Built on order 13422\'s real record with sample dispute notice data. Never submit this pack to an acquirer.'
 
 const ACQUIRER = 'Obtain from acquirer'
 const FULFILMENT = 'Obtain from fulfilment system'
@@ -442,19 +448,29 @@ type Ctx = {
   claimItems: Item[]
 }
 
+const isSample = (d: Row) => d.sample === true
+// A notice value: marked sample when the sample example supplies it; a missing value stays missing either way.
+const notice = (d: Row, item: Item): Item => (isSample(d) && item.status === 'present' ? { ...item, origin: 'sample' } : item)
+
 function claimItems(input: PackInput): Item[] {
   const d = input.dispute
   const filed = s(d.processor) as Processor | null
   return [
     present('Dispute claim as filed', s(d.reason)),
-    present('Processor as filed', filed ? PROCESSOR_LABEL[filed] : null),
-    present('Acquirer / channel', s(d.channel), { obtain_from: ACQUIRER }),
-    present('Reason code / condition as filed', s(d.reason_code), { obtain_from: ACQUIRER }),
-    present('Dispute date', date(d.dispute_date), { obtain_from: ACQUIRER, ...(date(d.opened_at) ? { note: `Not filed. The dispute was recorded in AgentReceipt on ${date(d.opened_at)}.` } : {}) }),
-    present('Dispute amount', money(n(d.dispute_amount_cents)), { obtain_from: ACQUIRER }),
-    present('Processor reference', s(d.processor_reference), { obtain_from: ACQUIRER, note: 'Not in AgentReceipt record — obtain from acquirer.' }),
+    notice(d, present('Processor as filed', filed ? PROCESSOR_LABEL[filed] : null)),
+    notice(d, present('Acquirer / channel', s(d.channel), { obtain_from: ACQUIRER })),
+    notice(d, present('Reason code / condition as filed', s(d.reason_code), { obtain_from: ACQUIRER })),
+    notice(d, present('Dispute date', date(d.dispute_date), { obtain_from: ACQUIRER, ...(date(d.opened_at) ? { note: `Not filed. The dispute was recorded in AgentReceipt on ${date(d.opened_at)}.` } : {}) })),
+    notice(d, present('Dispute amount', money(n(d.dispute_amount_cents)), { obtain_from: ACQUIRER })),
+    notice(d, present('Processor reference', s(d.processor_reference), { obtain_from: ACQUIRER, note: 'Not in AgentReceipt record — obtain from acquirer.' })),
   ]
 }
+// Cardholder details come from the grant (real record), not from the notice.
+const cardholderItem = (g: Row | null): Item => present('Cardholder details (as recorded on the grant)', s(g?.shopper_ref), { obtain_from: ACQUIRER })
+const credentialItem = (d: Row, label: string): Item =>
+  notice(d, present(label, s(d.card_last4_or_token), { obtain_from: ACQUIRER, note: 'AgentReceipt records the payment method, not the credential.' }))
+const withTone = (sections: Section[]): Section[] =>
+  sections.map((x) => ({ ...x, tone: x.items.some((i) => i.origin === 'sample') ? 'sample' : 'record' }))
 
 function visa(c: Ctx): { sections: Section[]; notes: string[] } {
   const total = c.action.find((i) => i.label === 'Total price')
@@ -464,8 +480,8 @@ function visa(c: Ctx): { sections: Section[]; notes: string[] } {
     { key: 'dispute', title: 'Dispute condition and transaction', items: [
       ...c.claimItems,
       { label: 'Transaction amount', value: total?.value ?? null, status: total?.value ? 'present' : 'missing', obtain_from: ACQUIRER },
-      present('Payment credential (last 4 / token only)', null, { obtain_from: ACQUIRER, note: 'AgentReceipt records the payment method, not the credential.' }),
-      present('Cardholder information required by the condition', null, { obtain_from: ACQUIRER }),
+      credentialItem(c.input.dispute, 'Payment credential (last 4 / token only)'),
+      cardholderItem(c.input.grant),
     ] },
     { key: 'grant', title: 'Cardholder authorisation — the grant the customer gave the agent', items: c.grant },
     { key: 'action', title: 'Transaction — what the agent did', items: c.action },
@@ -485,13 +501,14 @@ function visa(c: Ctx): { sections: Section[]; notes: string[] } {
     ...(c.key === '13.5' ? ['Visa guide, condition 13.5: assessed on what was communicated at the time of purchase; internal policies do not replace customer-facing disclosures.'] : []),
     DEADLINE_LINE,
   ]
-  return { sections, notes }
+  return { sections: withTone(sections), notes }
 }
 
 function mastercard(c: Ctx): { sections: Section[]; notes: string[] } {
   const sections: Section[] = [
     { key: 'dispute', title: 'Chargeback details', items: [
       ...c.claimItems,
+      ...(s(c.input.dispute.card_last4_or_token) ? [credentialItem(c.input.dispute, 'Card last 4 / token')] : []),
       present('Authorisation code / initial authorisation date', null, { obtain_from: ACQUIRER }),
       present('Settlement Date (DE 15) / Central Site Business Date', null, { obtain_from: ACQUIRER, note: 'Needed for the second presentment time frame.' }),
       present('Message text (DE 72) and message reason code', null, { obtain_from: ACQUIRER, note: 'Entered by the acquirer; AgentReceipt does not set DE values.' }),
@@ -513,14 +530,14 @@ function mastercard(c: Ctx): { sections: Section[]; notes: string[] } {
     'Mastercard guide: second presentment documentation received on or after a pre-arbitration or arbitration case filing is not considered.',
     DEADLINE_LINE,
   ]
-  return { sections, notes }
+  return { sections: withTone(sections), notes }
 }
 
 // ---------- needs (missing-documents checklist) ----------
 const WHY: Record<Processor, Record<string, string>> = {
   visa: {
     'Payment credential (last 4 / token only)': 'Visa 10.4 compelling evidence must include the payment credential (last 4 / token only).',
-    'Cardholder information required by the condition': 'Visa 10.4 compelling evidence must include cardholder information.',
+    'Cardholder details (as recorded on the grant)': 'Visa 10.4 compelling evidence must include cardholder information.',
     'Proof of delivery': 'Proof of delivery / access is a strong response listed in the Visa guide.',
     'Product page / checkout as presented (screenshots)': 'Visa 13.3 / 13.5 responses need the description and terms exactly as presented at purchase.',
   },
@@ -684,6 +701,7 @@ export async function buildPack(input: PackInput): Promise<Pack> {
     schema: 'agentreceipt.evidence-pack/v1',
     processor, processor_label: base.processor_label, filed_processor: filed, guide: GUIDE[processor],
     order_ref: base.order_ref, receipt_ref: base.receipt_ref, merchant: input.merchant.name,
+    sample: isSample(dispute),
     trusted: input.gate.status === 'passed',
     claim,
     claim_vs_record: claimVsRecord(claimType, receipt, input.reviews),

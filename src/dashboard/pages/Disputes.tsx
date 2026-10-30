@@ -4,12 +4,13 @@ import type { Dispute, DisputeEvent, MerchantReview, Receipt, Shipment } from '.
 import { verifyOrderChain, type OrderChainCheck } from '../../shared/chain'
 import { formatMoney } from '../../shared/format'
 import {
-  CLAIM_TYPES, CLAIM_TYPE_LABEL, DISCLAIMER, PROCESSORS, PROCESSOR_LABEL, buildPack, merchantInputNeeds,
+  CLAIM_TYPES, CLAIM_TYPE_LABEL, DISCLAIMER, PROCESSORS, PROCESSOR_LABEL, SAMPLE_LABEL, buildPack, merchantInputNeeds,
   type Gate, type Pack, type Processor, type TextSource, type Texts,
 } from '../../../supabase/functions/disputes/pack'
 import { DISPUTE_STATUS, PACK_STATUSES, packStatus, shownEvents } from '../status'
 import { loadOrderChain, num, str, useRows, type Rows } from '../data'
 import { callDisputes, MERCHANT_NAME } from '../disputes'
+import { sampleDisputeFor, SAMPLE_ORDER_REF } from '../sampleDispute'
 import { packExport, packToHtml } from '../packView'
 import { Card, Empty, Live, PageTitle } from '../components/Panel'
 import VerdictTable from '../components/VerdictTable'
@@ -93,6 +94,25 @@ const filedProcessor = (d: Dispute): Processor | null => (d.processor === 'visa'
 const INPUT = 'w-full rounded-md border border-dash-edge bg-dash-card-raised px-2 py-1.5 text-sm text-dash-ink'
 const BTN = 'rounded-md border border-dash-teal px-3 py-1.5 text-sm font-semibold text-dash-teal hover:bg-dash-card-raised disabled:cursor-not-allowed disabled:opacity-50'
 const LABEL = 'block text-xs font-semibold uppercase tracking-wider text-dash-label'
+// Data legend. Real record values are blue, sample dispute-notice values are orange (section accent + value colour,
+// never a per-field tag). Missing keeps its own grey "Missing" chip, so it never reads as sample.
+const REAL = 'text-dash-real'
+const SAMPLE = 'text-dash-sample'
+const TONE: Record<'record' | 'sample', string> = { record: 'border-l-4 border-dash-real pl-3', sample: 'border-l-4 border-dash-sample pl-3' }
+function MissingChip() {
+  return <span className="mr-1 inline-block rounded border border-dashed border-dash-label px-1 text-xs font-semibold uppercase tracking-wider text-dash-label">Missing</span>
+}
+export function Legend({ testid }: { testid: string }) {
+  return (
+    <div className="mb-4 rounded-lg border border-dash-edge bg-dash-card-raised px-3 py-2 text-sm text-dash-body" data-testid={testid}>
+      <p data-legend>
+        <span className={`font-semibold ${REAL}`}>Blue</span>{' = real data from the transaction record. '}
+        <span className={`font-semibold ${SAMPLE}`}>Orange</span>{' = sample data — what we would receive from merchant dispute records when the store is connected.'}
+      </p>
+      <p className="mt-1 text-xs text-dash-label"><MissingChip />= not in the record; each missing item says where to obtain it.</p>
+    </div>
+  )
+}
 
 export default function Disputes() {
   const [reload, setReload] = useState(0)
@@ -127,6 +147,7 @@ export default function Disputes() {
         concede. {DISCLAIMER}
       </p>
 
+      <Legend testid="legend-list" />
       <Live state={state}>
         {() => {
           const merchant = merchants.status === 'ready' ? merchants.rows.find((m) => m.name === MERCHANT_NAME) : undefined
@@ -136,10 +157,13 @@ export default function Disputes() {
           const evs = events.status === 'ready' ? events.rows : []
           const ships = shipments.status === 'ready' ? shipments.rows : []
           // This merchant's disputes only: a dispute belongs to the merchant of its order's receipt.
-          const rows = (disputes.status === 'ready' ? disputes.rows : [])
+          const rows: ListRow[] = (disputes.status === 'ready' ? disputes.rows : [])
             .map((d) => ({ d, receipt: rcpts.find((r) => r.id === d.receipt_id && r.merchant_id === merchant.id) }))
             .filter((x): x is { d: Dispute; receipt: Receipt } => !!x.receipt)
             .map((x) => ({ ...x, events: evs.filter((e) => e.dispute_id === x.d.id), shipment: ships.find((s) => s.receipt_id === x.receipt.id) ?? null }))
+          // The sample example: order 13422's real record with sample dispute-notice data. Built here, never stored.
+          const base = rcpts.find((r) => r.order_ref === SAMPLE_ORDER_REF && r.merchant_id === merchant.id)
+          if (base) rows.push({ d: sampleDisputeFor(base), receipt: base, events: [], shipment: ships.find((s) => s.receipt_id === base.id) ?? null, sample: true })
           return (
             <DisputesBody
               merchant={merchant} rows={rows} open={open} setOpen={setOpen} auto={auto}
@@ -154,7 +178,7 @@ export default function Disputes() {
   )
 }
 
-type ListRow = { d: Dispute; receipt: Receipt; events: DisputeEvent[]; shipment: Shipment | null }
+type ListRow = { d: Dispute; receipt: Receipt; events: DisputeEvent[]; shipment: Shipment | null; sample?: boolean }
 
 function DisputesBody(props: {
   merchant: Merchant; rows: ListRow[]; open: string | null; setOpen: (id: string | null) => void; auto: string | null; clearAuto: () => void
@@ -258,26 +282,29 @@ function ListLine({ row, merchant, reload, isOpen, onToggle }: { row: ListRow; m
   const product = [str(sum.brand), str(sum.product_name)].filter(Boolean).join(' ')
   const total = num(sum.total_cents)
   const mi = pack ? merchantInputNeeds(pack).length : 0
+  // Notice values: orange on the sample example, blue when filed, grey "Missing" when not in the record.
+  const noticeCls = row.sample ? SAMPLE : REAL
   return (
-    <tr className="border-b border-dash-edge align-top" data-dispute-order={receipt.order_ref ?? undefined}>
+    <tr className={`border-b border-dash-edge align-top ${row.sample ? 'bg-dash-card-raised' : ''}`} data-dispute-order={row.sample ? undefined : receipt.order_ref ?? undefined} data-sample-row={row.sample ? 'true' : undefined}>
       <td className="py-2 pr-3">
-        <span className="font-semibold text-dash-ink">{receipt.order_ref ?? '–'}</span>
-        <span className="block text-xs">{receipt.receipt_ref}</span>
-        <span className="block text-xs text-dash-label">Ordered {day(receipt.sealed_at) ?? 'date not in record'}</span>
-        <span className="block text-xs text-dash-label">{shipment ? `Shipped ${shipment.shipped_on}` : 'Shipment date not in record'}</span>
+        {row.sample && <span className={`mb-1 block text-xs font-bold ${SAMPLE}`} data-testid="sample-label">Sample example — not a filed dispute</span>}
+        <span className={`font-semibold ${REAL}`}>{receipt.order_ref ?? '–'}</span>
+        <span className={`block text-xs ${REAL}`}>{receipt.receipt_ref}</span>
+        <span className="block text-xs text-dash-label">Ordered <span className={REAL}>{day(receipt.sealed_at) ?? 'date not in record'}</span></span>
+        <span className="block text-xs text-dash-label">{shipment ? <>Shipped <span className={REAL}>{shipment.shipped_on}</span></> : <><MissingChip />Shipment date not in record</>}</span>
       </td>
-      <td className="py-2 pr-3">{product || '–'}<span className="block">{total === null ? '–' : formatMoney(total)}</span><span className="block text-xs text-dash-label">{merchant.name}</span></td>
+      <td className={`py-2 pr-3 ${REAL}`}>{product || '–'}<span className="block">{total === null ? '–' : formatMoney(total)}</span><span className="block text-xs text-dash-label">{merchant.name}</span></td>
       <td className="py-2 pr-3">
-        <span className="text-dash-ink">Claim: {d.reason}</span>
+        <span className={REAL}>Claim: {d.reason}</span>
         {pack && <span className="block text-xs text-dash-body">→ {pack.texts.claim_plain}</span>}
       </td>
-      <td className="py-2 pr-3">{filed ? PROCESSOR_LABEL[filed] : 'Not filed'}<span className="block text-xs text-dash-label">{d.channel ?? 'Acquirer channel not in record'}</span></td>
+      <td className="py-2 pr-3">{filed ? <span className={noticeCls}>{PROCESSOR_LABEL[filed]}</span> : <span className="text-dash-label"><MissingChip />Not filed</span>}<span className="block text-xs">{d.channel ? <span className={noticeCls}>{d.channel}</span> : <span className="text-dash-label">Acquirer channel not in record</span>}</span></td>
       <td className="py-2 pr-3">
-        {d.reason_code ? `${filed ? PROCESSOR_LABEL[filed] : ''} ${d.reason_code}` : 'Not filed'}
+        {d.reason_code ? <span className={noticeCls}>{`${filed ? PROCESSOR_LABEL[filed] : ''} ${d.reason_code}`}</span> : <span className="text-dash-label"><MissingChip />Not filed</span>}
         {pack && <span className="block text-xs text-dash-body">→ {pack.claim.condition_plain}</span>}
         {pack?.claim.code_flag && <span className="block text-xs font-semibold text-dash-attention">{pack.claim.code_flag}</span>}
       </td>
-      <td className="py-2 pr-3 font-semibold text-dash-ink" data-testid="pack-status">{packStatus(events)}</td>
+      <td className="py-2 pr-3 font-semibold text-dash-ink" data-testid="pack-status">{row.sample ? 'Sample — not filed' : packStatus(events)}</td>
       <td className="py-2 pr-3">
         {load.status === 'checking' && <span className="text-xs text-dash-label">Checking…</span>}
         {load.status === 'error' && <span className="text-xs text-dash-violation">Could not read the record</span>}
@@ -403,7 +430,7 @@ function DisputeDetail({ row, merchant, reload, onChanged, autoGenerate, clearAu
     onChanged()
   }
   useEffect(() => {
-    if (!autoGenerate || load.status !== 'done' || !pack) return
+    if (row.sample || !autoGenerate || load.status !== 'done' || !pack) return
     clearAuto()
     if (!latestPackEvent(load.data.events, processor)) void generate()
   }, [autoGenerate, load, pack])
@@ -411,10 +438,12 @@ function DisputeDetail({ row, merchant, reload, onChanged, autoGenerate, clearAu
   return (
     <div data-testid="dispute-detail" data-dispute-detail={receipt.order_ref ?? undefined}>
       <Card label={`Dispute detail ${receipt.order_ref ?? receipt.receipt_ref}`}>
+        <Legend testid="legend-detail" />
+        {row.sample && <p className={`mb-3 font-bold ${SAMPLE}`} data-testid="sample-detail-label">{SAMPLE_LABEL}</p>}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-lg font-bold text-dash-ink">Order {receipt.order_ref ?? '–'} · {receipt.receipt_ref}</p>
-            <p className="text-sm text-dash-body" data-testid="dispute-date">{d.dispute_date ? `Dispute filed ${d.dispute_date}` : `Dispute date not filed — recorded in AgentReceipt ${d.opened_at.slice(0, 10)}`} · {filed ? PROCESSOR_LABEL[filed] : 'processor not filed'} {d.reason_code ?? ''}</p>
+            <p className={`text-sm ${row.sample ? SAMPLE : 'text-dash-body'}`} data-testid="dispute-date">{d.dispute_date ? `Dispute filed ${d.dispute_date}` : `Dispute date not filed — recorded in AgentReceipt ${d.opened_at.slice(0, 10)}`} · {filed ? PROCESSOR_LABEL[filed] : 'processor not filed'} {d.reason_code ?? ''}</p>
           </div>
           <label className="text-sm">
             <span className={LABEL}>Pack format</span>
@@ -450,7 +479,13 @@ function DisputeDetail({ row, merchant, reload, onChanged, autoGenerate, clearAu
             <Timeline row={row} data={load.data} />
             <PackView pack={pack} events={events} busy={busy} onGenerate={generate} merchant={merchant} dispute={d} onChanged={onChanged} />
             <Needed pack={pack} />
-            <Decisions pack={pack} merchant={merchant} dispute={d} events={events} onChanged={onChanged} />
+            {row.sample ? (
+              <Block title="Merchant decision and outcome" testid="decisions">
+                <p className="text-sm text-dash-body">Not available on the sample example: it is not a filed dispute, so there is nothing to fight, concede or submit.</p>
+              </Block>
+            ) : (
+              <Decisions pack={pack} merchant={merchant} dispute={d} events={events} onChanged={onChanged} />
+            )}
             <Block title="Related (navigation only)">
               <p className="text-sm text-dash-body">
                 <Link className="font-semibold text-dash-teal" to="/dashboard/orders">Agent orders — this order&apos;s Order check</Link>
@@ -473,11 +508,11 @@ function ClaimVsRecord({ pack }: { pack: Pack }) {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-dash-edge p-3 text-sm">
           <p className={LABEL}>Claim, as filed</p>
-          <p className="mt-1 font-semibold text-dash-ink">{pack.claim.as_filed}</p>
+          <p className={`mt-1 font-semibold ${REAL}`}>{pack.claim.as_filed}</p>
           <p className="mt-1 text-dash-body">{pack.texts.claim_plain}</p>
           <p className={`${LABEL} mt-3`}>Reason code / condition, as filed</p>
-          <p className="mt-1 font-semibold text-dash-ink">
-            {pack.claim.condition_as_filed ? `${pack.filed_processor ? PROCESSOR_LABEL[pack.filed_processor] : ''} ${pack.claim.condition_as_filed}` : 'Not filed'}
+          <p className={`mt-1 font-semibold ${pack.claim.condition_as_filed ? (pack.sample ? SAMPLE : REAL) : 'text-dash-label'}`} data-testid="condition-as-filed">
+            {pack.claim.condition_as_filed ? `${pack.filed_processor ? PROCESSOR_LABEL[pack.filed_processor] : ''} ${pack.claim.condition_as_filed}` : <><MissingChip />Not filed</>}
           </p>
           <p className="mt-1 text-dash-body">{pack.claim.condition_plain}</p>
           {pack.claim.code_flag && <p className="mt-1 font-semibold text-dash-attention">{pack.claim.code_flag}</p>}
@@ -490,7 +525,7 @@ function ClaimVsRecord({ pack }: { pack: Pack }) {
               <li key={e.element} data-element={e.element}>
                 <span className="font-semibold text-dash-ink">{e.element}</span>
                 <span className="block text-xs text-dash-label">{e.claim}</span>
-                <span className="block">{e.record}</span>
+                <span className={`block ${REAL}`}>{e.record}</span>
                 <span className={RESULT_TEXT[e.result].cls}>{RESULT_TEXT[e.result].text}</span>
               </li>
             ))}
@@ -504,7 +539,7 @@ function ClaimVsRecord({ pack }: { pack: Pack }) {
 // A step's own date (or timestamp), and its place in the order's life: grant 0, action 1, verdict 2, merchant review 3,
 // shipment 4, dispute filed 5, pack and merchant entries 6. Steps are sorted by day, then by that place, then by time,
 // so records that carry only a date never jump ahead of same-day records that carry a time.
-type Step = { at: string; rank: number; title: string; detail: string; source: string; dateLabel?: string }
+type Step = { at: string; rank: number; title: string; detail: string; source: string; dateLabel?: string; sample?: boolean }
 
 function Timeline({ row, data }: { row: ListRow; data: Loaded }) {
   const { d, receipt } = row
@@ -528,9 +563,9 @@ function Timeline({ row, data }: { row: ListRow; data: Loaded }) {
     steps.push({ at: receipt.sealed_at ?? '', rank: 4, title: 'Shipment', dateLabel: 'no record', detail: 'Shipment date not in record. Delivery proof missing.', source: 'No shipment record' })
   }
   steps.push({
-    at: d.dispute_date ?? d.opened_at, rank: 5, title: 'Dispute filed', dateLabel: disputeDateLabel(d),
+    at: d.dispute_date ?? d.opened_at, rank: 5, title: d.sample ? 'Dispute filed (sample notice)' : 'Dispute filed', dateLabel: disputeDateLabel(d), sample: d.sample === true,
     detail: `${d.reason} · ${d.processor ? PROCESSOR_LABEL[d.processor] : 'processor not filed'} ${d.reason_code ?? ''} · amount ${d.dispute_amount_cents == null ? 'not in record' : formatMoney(d.dispute_amount_cents)}`,
-    source: d.dispute_date ? 'Dispute record (as filed)' : 'Dispute record: the filed dispute date is not in the record; the date shown is when it was recorded in AgentReceipt',
+    source: d.sample ? 'Sample dispute notice — not filed, not stored' : d.dispute_date ? 'Dispute record (as filed)' : 'Dispute record: the filed dispute date is not in the record; the date shown is when it was recorded in AgentReceipt',
   })
   for (const e of shownEvents(data.events)) {
     if (e.event_type === 'opened') continue
@@ -550,8 +585,8 @@ function Timeline({ row, data }: { row: ListRow; data: Loaded }) {
         {steps.map((s, i) => (
           <li key={i}>
             <span className="font-semibold text-dash-ink">{s.title}</span>
-            <span className="ml-2 text-xs text-dash-label">{s.dateLabel ?? s.at.slice(0, 10)}</span>
-            <span className="block text-dash-body">{s.detail}</span>
+            <span className={`ml-2 text-xs ${s.sample ? SAMPLE : s.dateLabel === 'no record' ? 'text-dash-label' : REAL}`}>{s.dateLabel ?? s.at.slice(0, 10)}</span>
+            <span className={`block ${s.sample ? SAMPLE : s.dateLabel === 'no record' ? 'text-dash-label' : REAL}`} data-step-value={s.sample ? 'sample' : s.dateLabel === 'no record' ? 'missing' : 'record'}>{s.detail}</span>
             <span className="block text-xs text-dash-label">Source: {s.source}</span>
           </li>
         ))}
@@ -585,11 +620,13 @@ function PackView({ pack, events, busy, onGenerate, merchant, dispute, onChanged
   }
   return (
     <Block title={`Evidence package — ${pack.processor_label} field order`} testid="evidence-pack">
+      <Legend testid="legend-pack" />
+      {pack.sample && <p className={`mb-2 font-bold ${SAMPLE}`} data-testid="sample-pack-label">{SAMPLE_LABEL}</p>}
       <p className="text-sm text-dash-body" data-testid="pack-explanation">{pack.texts.explanation}</p>
       <p className={`mt-1 text-xs font-semibold ${pack.text_source === 'muse-spark' ? 'text-dash-teal' : 'text-dash-attention'}`} data-testid="text-source">{pack.text_label}</p>
       <p className="mt-2 break-all font-mono text-xs text-dash-label">Pack version (hash of its JSON): {pack.pack_hash}</p>
       <p className="text-xs text-dash-label" data-testid="pack-record">
-        {rec
+        {pack.sample ? 'Sample example: shown here only, never recorded, never filed.' : rec
           ? rec.basis.pack_hash === pack.pack_hash
             ? `Matches the pack generation record of ${String(rec.basis.generated_at ?? rec.created_at ?? '').slice(0, 10)}.`
             : `Differs from the pack generation record of ${String(rec.basis.generated_at ?? rec.created_at ?? '').slice(0, 10)}: the record or texts changed after that pack was generated. Regenerate to record this version.`
@@ -598,14 +635,14 @@ function PackView({ pack, events, busy, onGenerate, merchant, dispute, onChanged
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={BTN} onClick={() => download(`${name}.json`, JSON.stringify(packExport(pack, events), null, 2), 'application/json')}>Download JSON</button>
         <button type="button" className={BTN} onClick={() => { const w = window.open('', '_blank'); if (w) { w.document.write(packToHtml(pack, events)); w.document.close(); w.focus(); w.print() } }}>Printable pack (print / save as PDF)</button>
-        <button type="button" className={BTN} onClick={markDownloaded} disabled={marking}>Mark as downloaded</button>
-        <button type="button" className={BTN} onClick={onGenerate} disabled={busy !== null}>{busy === 'generate' ? 'Generating…' : rec ? 'Regenerate pack' : 'Generate pack'}</button>
+        {!pack.sample && <button type="button" className={BTN} onClick={markDownloaded} disabled={marking}>Mark as downloaded</button>}
+        {!pack.sample && <button type="button" className={BTN} onClick={onGenerate} disabled={busy !== null}>{busy === 'generate' ? 'Generating…' : rec ? 'Regenerate pack' : 'Generate pack'}</button>}
       </div>
       {err && <p className="mt-2 text-sm text-dash-violation">{err}</p>}
       <p className="mt-2 text-xs text-dash-label">Downloading does not mark the pack as submitted. Mark it yourself when you submit it to your acquirer.</p>
 
       {pack.sections.map((s) => (
-        <div key={s.key} className="mt-5" data-pack-section={s.key}>
+        <div key={s.key} className={`mt-5 ${TONE[s.tone ?? 'record']}`} data-pack-section={s.key} data-tone={s.tone ?? 'record'}>
           <p className="mb-2 text-sm font-bold text-dash-ink">{s.title}</p>
           {s.key === 'merchant_review' && <p className="mb-2 text-sm text-dash-body" data-testid="merchant-review-statement">{pack.merchant_review_statement}</p>}
           {s.items.length > 0 && (
@@ -613,8 +650,12 @@ function PackView({ pack, events, busy, onGenerate, merchant, dispute, onChanged
               {s.items.map((i, k) => (
                 <div key={k} className="contents">
                   <dt className="text-dash-label">{i.label}</dt>
-                  <dd className={i.label === 'Tamper check' ? (pack.trusted ? 'font-semibold text-dash-teal break-all' : 'font-bold text-dash-violation') : i.status === 'missing' ? 'text-dash-attention' : 'text-dash-ink break-words'} {...(i.label === 'Tamper check' ? { 'data-testid': 'tamper-line' } : {})}>
-                    {i.status === 'missing' && i.label !== 'Tamper check' ? `Missing — ${i.obtain_from}${i.note ? ` (${i.note})` : ''}` : i.value}
+                  <dd
+                    className={i.label === 'Tamper check' ? (pack.trusted ? `font-semibold ${REAL} break-all` : 'font-bold text-dash-violation') : i.status === 'missing' ? 'text-dash-label' : i.status === 'unspecified' ? 'text-dash-label' : `${i.origin === 'sample' ? SAMPLE : REAL} break-words`}
+                    data-value={i.label === 'Tamper check' ? 'gate' : i.status === 'missing' ? 'missing' : i.origin === 'sample' ? 'sample' : i.status === 'unspecified' ? 'unspecified' : 'record'}
+                    {...(i.label === 'Tamper check' ? { 'data-testid': 'tamper-line' } : {})}
+                  >
+                    {i.status === 'missing' && i.label !== 'Tamper check' ? <><MissingChip />{i.obtain_from}{i.note ? ` (${i.note})` : ''}</> : i.value}
                   </dd>
                 </div>
               ))}

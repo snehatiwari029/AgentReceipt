@@ -3,13 +3,14 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildSeed, MERCHANT_ID } from '../../scripts/seed-dashboard-demo'
 import {
-  CE3_LINE, DEADLINE_LINE, FALLBACK_LABEL, MC_REGISTRATION_LINE, NO_REVIEW, buildPack, packHashOf, sparkInput, validateSparkTexts,
+  CE3_LINE, DEADLINE_LINE, FALLBACK_LABEL, MC_REGISTRATION_LINE, NO_REVIEW, SAMPLE_LABEL, buildPack, packHashOf, sparkInput, validateSparkTexts,
   type Gate, type PackInput, type Processor,
 } from '../../supabase/functions/disputes/pack'
 import { NOT_AGENT_ORDER, ONE_DISPUTE, ROUTES, type DisputesDb, type DisputesDeps } from '../../supabase/functions/disputes/run'
 import { createSparkTextWriter, type PackTextWriter } from '../../supabase/functions/disputes/spark'
 import { verifyOrderChain, type ChainRecord } from '../shared/chain'
 import { packExport, packToHtml } from '../dashboard/packView'
+import { sampleDisputeFor } from '../dashboard/sampleDispute'
 
 type Row = Record<string, unknown>
 const NW = { id: MERCHANT_ID, name: 'Northwind Outfitters' }
@@ -107,7 +108,6 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
       ['Dispute amount', 'Obtain from acquirer'],
       ['Processor reference', 'Obtain from acquirer'],
       ['Payment credential (last 4 / token only)', 'Obtain from acquirer'],
-      ['Cardholder information required by the condition', 'Obtain from acquirer'],
       ['Carrier', 'Obtain from fulfilment system'],
       ['Tracking reference', 'Obtain from fulfilment system'],
       ['Proof of delivery', 'Obtain from fulfilment system'],
@@ -203,6 +203,27 @@ describe('Dispute Agent: evidence pack for 13422 (seeded, Visa 10.4)', () => {
       const p = await packFor(w, '13422', proc)
       expect(packToHtml(p, w.tables.dispute_events as never)).not.toMatch(/layer/i)
       expect(JSON.stringify(packExport(p, w.tables.dispute_events as never))).not.toMatch(/layer/i)
+    }
+  })
+
+  it('printable view carries the same legend at the top; a sample pack is marked once and never as a filing', async () => {
+    const w = await world()
+    const real = await packFor(w, '13422', 'visa')
+    const html = packToHtml(real, [])
+    expect(html).toContain('<b class="real">Blue</b> = real data from the transaction record. <b class="sample">Orange</b> = sample data — what we would receive from merchant dispute records when the store is connected.')
+    expect(html.indexOf('class="legend"')).toBeLessThan(html.indexOf('<h1>'))
+    expect(real.sample).toBe(false)
+    expect(html).not.toContain(SAMPLE_LABEL)
+    const receipt = w.tables.receipts.find((r) => r.order_ref === '13422')!
+    const sample = await packFor(w, '13422', 'visa', { dispute: { ...sampleDisputeFor(receipt as never) } as never })
+    expect(sample.sample).toBe(true)
+    const sh = packToHtml(sample, [])
+    expect(sh.split(SAMPLE_LABEL).length - 1).toBe(1) // marked once
+    expect(sh).toContain('<span class="sample">SAMPLE-13422-VISA-104</span>')
+    expect(sh).toContain('<span class="real">Ivan Dijkstra</span>')
+    // the real record is identical in both packs
+    for (const k of ['grant', 'action', 'terms', 'verdict', 'receipt']) {
+      expect(sample.sections.find((x) => x.key === k)).toEqual(real.sections.find((x) => x.key === k))
     }
   })
 

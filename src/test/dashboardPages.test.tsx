@@ -29,6 +29,11 @@ beforeAll(async () => {
   }
 })
 
+// The live dispute row (not the sample example) and its View details button.
+const liveRow = async () => (await screen.findAllByText('AR-2026-0043')).map((x) => x.closest('tr')!).find((tr) => !tr.hasAttribute('data-sample-row'))!
+const openLive = async (user: ReturnType<typeof userEvent.setup>) => user.click(within(await liveRow()).getByRole('button', { name: 'View details' }))
+const openSample = async (user: ReturnType<typeof userEvent.setup>) => user.click(within((await screen.findByTestId('sample-label')).closest('tr')!).getByRole('button', { name: 'View details' }))
+
 const open = (path: string) => {
   sessionStorage.setItem('agentreceipt-demo-merchant', 'yes')
   render(
@@ -140,18 +145,18 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
 
   it('Disputes lists shipped + disputed agent orders only: 13422 (Visa 10.4, Won); 12322, 14522, 15001-type Review / Hold orders do not appear', async () => {
     open('/dashboard/disputes')
-    const row = (await screen.findByText('AR-2026-0043')).closest('tr') as HTMLElement
+    const row = await liveRow()
     expect(screen.queryByText('AR-2026-0042')).not.toBeInTheDocument()
     expect(screen.queryByText('14522')).not.toBeInTheDocument()
     expect(within(row).getByText('13422')).toBeInTheDocument()
-    expect(within(row).getByText('Shipped 2026-10-27')).toBeInTheDocument()
-    expect(within(row).getByText('Ordered 2026-10-26')).toBeInTheDocument()
+    expect(row).toHaveTextContent('Shipped 2026-10-27')
+    expect(row).toHaveTextContent('Ordered 2026-10-26')
     expect(within(row).getByText('Claim: Agent overstep — agent exceeded budget / bought outside grant')).toBeInTheDocument()
     expect(within(row).getByText('Visa 10.4 — Other Fraud, Card-Absent Environment')).toBeInTheDocument()
     expect(within(row).getByTestId('pack-status')).toHaveTextContent('Outcome: Won')
     expect(await within(row).findByText('→ Customer says the agent bought outside what they authorised.')).toBeInTheDocument()
     expect(within(row).getByText(/did not authorise or take part in this card-absent/)).toBeInTheDocument()
-    expect(within(row).getByText('8 documents missing — see pack')).toBeInTheDocument()
+    expect(within(row).getByText('7 documents missing — see pack')).toBeInTheDocument()
     expect(within(row).getByText('Merchant input required')).toBeInTheDocument()
     expect(screen.getByTestId('disputes-disclaimer')).toHaveTextContent(/AgentReceipt does not submit this pack on your behalf, and does not decide liability/)
     expect(screen.getByText(/Orders on\s+hold, Review Required, or Hold for Suspicion with no shipment do not appear here/)).toBeInTheDocument()
@@ -160,7 +165,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
   it('Dispute detail for 13422: claim vs record, timeline, pack in Visa order, tamper line with the receipt hash, missing items, merchant-reported Won', async () => {
     const user = userEvent.setup()
     open('/dashboard/disputes')
-    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    await openLive(user)
     const detail = await screen.findByTestId('dispute-detail')
     const hash = (SEEDED.receipts.data as Receipt[]).find((r) => r.order_ref === '13422')!.entry_hash
     expect(await within(detail).findByTestId('tamper-line')).toHaveTextContent(`Receipt chain verified — tamper check passed · ${hash}`)
@@ -194,7 +199,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
   it('Disputes: changing the pack format rebuilds it in the Mastercard field order and checklist', async () => {
     const user = userEvent.setup()
     open('/dashboard/disputes')
-    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    await openLive(user)
     const detail = await screen.findByTestId('dispute-detail')
     await within(detail).findByTestId('tamper-line')
     await user.selectOptions(within(detail).getByLabelText('Pack format'), 'mastercard')
@@ -212,7 +217,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
       r.order_ref === '13422' ? { ...r, action_summary: { ...r.action_summary, total_cents: 4898 } } : r)
     mock.tables = { ...SEEDED, receipts: { data: receipts, error: null } }
     open('/dashboard/disputes')
-    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    await openLive(user)
     const detail = await screen.findByTestId('dispute-detail')
     expect(await within(detail).findByText('Receipt chain failed verification — tamper check failed. This record is untrusted.')).toBeInTheDocument()
     expect(within(detail).getAllByText(/Entry \d+ \(receipt\) no longer matches its hash/).length).toBeGreaterThan(0)
@@ -224,7 +229,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     const user = userEvent.setup()
     mock.hangOn = ['chain_entries'] // the neighbouring-hash read never answers, so the check cannot finish
     open('/dashboard/disputes')
-    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    await openLive(user)
     const detail = await screen.findByTestId('dispute-detail')
     expect(within(detail).getByText(/Checking receipt chain… the evidence package is shown after the check/)).toBeInTheDocument()
     expect(within(detail).queryByTestId('evidence-pack')).not.toBeInTheDocument()
@@ -234,7 +239,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
   it('Disputes page and pack show no AgentReceipt recommendation, classifier, win probability or score; decision buttons are merchant actions', async () => {
     const user = userEvent.setup()
     open('/dashboard/disputes')
-    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    await openLive(user)
     const detail = await screen.findByTestId('dispute-detail')
     await within(detail).findByTestId('tamper-line')
     const text = screen.getByRole('main').textContent ?? ''
@@ -256,12 +261,12 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     }))
     try {
       open('/dashboard/disputes')
-      await user.click(await screen.findByRole('button', { name: 'View details' }))
+      await openLive(user)
       const detail = await screen.findByTestId('dispute-detail')
       await within(detail).findByTestId('tamper-line')
       await user.click(within(detail).getByRole('button', { name: 'Mark as Fought (submitted to acquirer)' }))
       const confirm = within(detail).getByTestId('decision-confirm')
-      expect(confirm).toHaveTextContent(/Pack summary, before you record this.*Visa format.*8 items missing from the record; 3 need your input/)
+      expect(confirm).toHaveTextContent(/Pack summary, before you record this.*Visa format.*7 items missing from the record; 3 need your input/)
       await user.type(within(confirm).getByLabelText('Decision date'), '2026-11-04')
       await user.type(within(confirm).getByLabelText('Reason'), 'Submitted again by our team.')
       await user.click(within(confirm).getByRole('button', { name: 'Confirm and record' }))
@@ -324,7 +329,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
     const user = userEvent.setup()
     await liveShape()
     open('/dashboard/disputes')
-    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    await openLive(user)
     const detail = await screen.findByTestId('dispute-detail')
     expect(await within(detail).findByTestId('tamper-line')).toHaveTextContent('Receipt chain verified — tamper check passed')
     // 1. chronological: the order before the dispute that it caused
@@ -357,7 +362,7 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
   it('no build vocabulary on screen: the Disputes page and the Agent orders merchant-action panel never say "Layer"', async () => {
     const user = userEvent.setup()
     open('/dashboard/disputes')
-    await user.click(await screen.findByRole('button', { name: 'View details' }))
+    await openLive(user)
     const detail = await screen.findByTestId('dispute-detail')
     await within(detail).findByTestId('tamper-line')
     for (const p of ['visa', 'mastercard']) {
@@ -365,6 +370,126 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
       await within(detail).findByText(p === 'visa' ? 'Dispute condition and transaction' : 'Chargeback details')
       expect(screen.getByRole('main').textContent).not.toMatch(/layer/i)
     }
+  })
+
+  const LEGEND_TEXT = 'Blue = real data from the transaction record. Orange = sample data — what we would receive from merchant dispute records when the store is connected.'
+
+  it('legend: the same wording at the top of the list, the detail view and the evidence pack', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/disputes')
+    const list = await screen.findByTestId('legend-list')
+    expect(list.querySelector('[data-legend]')!.textContent).toBe(LEGEND_TEXT)
+    // first thing on the page after the title: before the record form and the list
+    expect(list.compareDocumentPosition(screen.getByRole('region', { name: 'Record a dispute' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await openLive(user)
+    const detail = await screen.findByTestId('dispute-detail')
+    await within(detail).findByTestId('tamper-line')
+    expect(within(detail).getByTestId('legend-detail').querySelector('[data-legend]')!.textContent).toBe(LEGEND_TEXT)
+    const packEl = within(detail).getByTestId('evidence-pack')
+    const legend = within(packEl).getByTestId('legend-pack')
+    expect(legend.querySelector('[data-legend]')!.textContent).toBe(LEGEND_TEXT)
+    expect(legend.compareDocumentPosition(packEl.querySelector('[data-pack-section]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('sample example: a separate row, labelled once per place, with exactly the sample notice values in orange and the real record in blue', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    try {
+      open('/dashboard/disputes')
+      const label = await screen.findByTestId('sample-label')
+      expect(screen.getAllByTestId('sample-label')).toHaveLength(1)
+      expect(label).toHaveTextContent('Sample example — not a filed dispute')
+      const sampleRow = label.closest('tr')!
+      expect(within(sampleRow).getByTestId('pack-status')).toHaveTextContent('Sample — not filed')
+      await openSample(user)
+      const detail = await screen.findByTestId('dispute-detail')
+      await within(detail).findByTestId('tamper-line')
+      expect(within(detail).getAllByTestId('sample-detail-label')).toHaveLength(1)
+      expect(within(detail).getAllByTestId('sample-pack-label')).toHaveLength(1)
+      const packEl = within(detail).getByTestId('evidence-pack')
+      const value = (label: string) => [...packEl.querySelectorAll('dt')].find((dt) => dt.textContent === label)!.nextElementSibling as HTMLElement
+      const SAMPLE_VALUES: [string, string][] = [
+        ['Processor as filed', 'Visa'], ['Reason code / condition as filed', '10.4 — Other Fraud, Card-Absent Environment'], ['Dispute date', '2026-10-30'],
+        ['Dispute amount', '$489.83'], ['Processor reference', 'SAMPLE-13422-VISA-104'], ['Acquirer / channel', 'Sample acquirer (demo)'],
+        ['Payment credential (last 4 / token only)', '•••• 4242 (sample token / test last 4)'],
+      ]
+      for (const [l, v] of SAMPLE_VALUES) {
+        expect(value(l)).toHaveTextContent(v)
+        expect(value(l)).toHaveAttribute('data-value', 'sample')
+        expect(value(l)).toHaveClass('text-dash-sample')
+      }
+      // real fields: blue, unchanged
+      for (const [l, v] of [['Cardholder details (as recorded on the grant)', 'Ivan Dijkstra'], ['Dispute claim as filed', 'Agent overstep — agent exceeded budget / bought outside grant'], ['Transaction amount', '$489.83'], ['Budget (maximum total)', '$500.00 max'], ['Total price', '$489.83'], ['Receipt ID', 'AR-2026-0043'], ['Order check verdict (evidence only)', 'Pass, 0 problems']]) {
+        expect(value(l)).toHaveTextContent(v)
+        expect(value(l)).toHaveAttribute('data-value', 'record')
+        expect(value(l)).toHaveClass('text-dash-real')
+      }
+      const hash = (SEEDED.receipts.data as Receipt[]).find((r) => r.order_ref === '13422')!.entry_hash
+      expect(value('Receipt hash')).toHaveTextContent(hash)
+      expect(within(detail).getByTestId('tamper-line')).toHaveTextContent(`Receipt chain verified — tamper check passed · ${hash}`)
+      // the customer description is shown apart from the Visa condition
+      expect(within(detail).getByTestId('condition-as-filed')).toHaveTextContent('Visa 10.4 — Other Fraud, Card-Absent Environment')
+      expect(within(detail).getByTestId('condition-as-filed')).toHaveClass('text-dash-sample')
+      // section-level colour: the notice section is orange once; the record sections are blue
+      const tone = (k: string) => packEl.querySelector(`[data-pack-section="${k}"]`)!.getAttribute('data-tone')
+      expect(tone('dispute')).toBe('sample')
+      for (const k of ['grant', 'action', 'terms', 'verdict', 'receipt']) expect(tone(k)).toBe('record')
+      // no merchant actions, no recording, no write: nothing is sent anywhere for the sample
+      expect(within(detail).queryByRole('button', { name: /Mark as|Generate pack|Regenerate pack|Mark as downloaded/ })).not.toBeInTheDocument()
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(mock.inserted).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('live 13422 keeps its record: notice fields still Missing (not sample); record sections blue; no Sample tag, no per-field source line', async () => {
+    const user = userEvent.setup()
+    // the live record as it is (option C): no filed processor, code, date, amount, reference
+    const d = (SEEDED.disputes.data as Record<string, unknown>[]).map((x) => ({ id: x.id, receipt_id: x.receipt_id, reason: x.reason, opened_at: x.opened_at }))
+    mock.tables = { ...SEEDED, disputes: { data: d, error: null } }
+    open('/dashboard/disputes')
+    await openLive(user)
+    const detail = await screen.findByTestId('dispute-detail')
+    await within(detail).findByTestId('tamper-line')
+    expect(within(detail).queryByTestId('sample-detail-label')).not.toBeInTheDocument()
+    const packEl = within(detail).getByTestId('evidence-pack')
+    expect(packEl.querySelectorAll('[data-value="sample"]')).toHaveLength(0)
+    expect(packEl.querySelectorAll('[data-tone="sample"]')).toHaveLength(0)
+    const value = (label: string) => [...packEl.querySelectorAll('dt')].find((dt) => dt.textContent === label)!.nextElementSibling as HTMLElement
+    for (const l of ['Processor as filed', 'Reason code / condition as filed', 'Dispute date', 'Dispute amount', 'Processor reference', 'Acquirer / channel', 'Payment credential (last 4 / token only)']) {
+      expect(value(l)).toHaveAttribute('data-value', 'missing')
+      expect(value(l)).toHaveTextContent(/^Missing/)
+      expect(value(l)).not.toHaveClass('text-dash-sample')
+    }
+    for (const k of ['grant', 'action', 'terms', 'verdict', 'receipt']) expect(packEl.querySelector(`[data-pack-section="${k}"]`)).toHaveAttribute('data-tone', 'record')
+    // no per-field "Sample" tag and no per-field source line anywhere in the pack
+    expect(within(detail).queryAllByText(/^sample$/i)).toHaveLength(0)
+    expect(packEl.textContent).not.toMatch(/Source:/)
+  })
+
+  it('sample pack: missing items stay Missing (grey chip, never orange); sample values never read as missing', async () => {
+    const user = userEvent.setup()
+    open('/dashboard/disputes')
+    await openSample(user)
+    const detail = await screen.findByTestId('dispute-detail')
+    await within(detail).findByTestId('tamper-line')
+    const packEl = within(detail).getByTestId('evidence-pack')
+    const missing = [...packEl.querySelectorAll('[data-value="missing"]')]
+    expect(missing.length).toBeGreaterThan(0) // carrier, tracking, proof of delivery are still not in the record
+    for (const m of missing) {
+      expect(m.textContent).toMatch(/^Missing/)
+      expect(m).not.toHaveClass('text-dash-sample')
+    }
+    for (const s of packEl.querySelectorAll('[data-value="sample"]')) expect(s.textContent).not.toMatch(/Missing/)
+    expect(within(detail).queryAllByText(/^sample$/i)).toHaveLength(0)
+    expect(packEl.textContent).not.toMatch(/Source:/)
+  })
+
+  it('the sample example changes no order: Agent orders and the attention count are unchanged', async () => {
+    open('/dashboard')
+    expect(await screen.findByTestId('stat-attention')).toHaveTextContent('2')
   })
 
   it('Agent orders: a Review Required order offers "Record merchant action" (Layer 2); a Pass order does not', async () => {

@@ -1,4 +1,4 @@
-import type { Pack } from '../../supabase/functions/disputes/pack'
+import { SAMPLE_LABEL, type Pack } from '../../supabase/functions/disputes/pack'
 import type { DisputeEvent } from '../shared/schemas'
 import { DISPUTE_STATUS, shownEvents } from './status'
 
@@ -35,7 +35,9 @@ export function packToHtml(pack: Pack, events: DisputeEvent[]): string {
   const ex = packExport(pack, events)
   const p = ex.pack
   const items = (rows: Pack['sections'][number]['items']) =>
-    rows.map((i) => `<tr><th>${esc(i.label)}</th><td>${i.status === 'missing' ? `<b>Missing</b> — ${esc(i.obtain_from)}${i.note ? ` (${esc(i.note)})` : ''}` : esc(i.value)}</td></tr>`).join('')
+    rows.map((i) => `<tr><th>${esc(i.label)}</th><td>${i.status === 'missing'
+      ? `<span class="miss">Missing</span> ${esc(i.obtain_from)}${i.note ? ` (${esc(i.note)})` : ''}`
+      : `<span class="${i.status === 'unspecified' ? 'unsp' : i.origin === 'sample' ? 'sample' : 'real'}">${esc(i.value)}</span>`}</td></tr>`).join('')
   const verdict = (rows: NonNullable<Pack['sections'][number]['verdict']>) =>
     `<table><tr><th>Field</th><th>Grant</th><th>Merchant terms</th><th>Actual</th><th>Match</th><th>Cause</th><th>Next action / Who acts</th></tr>${rows
       .map((r) => `<tr><td>${esc(r.field)}</td><td>${esc(r.grant ?? '–')}</td><td>${esc(r.merchant_terms ?? '–')}</td><td>${esc(r.actual ?? '–')}</td><td>${esc(RESULT[r.result] ?? r.result)}</td><td>${esc(r.cause ?? '–')}</td><td>${esc(r.next_action_who ?? '–')}</td></tr>`)
@@ -43,7 +45,11 @@ export function packToHtml(pack: Pack, events: DisputeEvent[]): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Evidence pack ${esc(p.order_ref ?? p.receipt_ref)} — ${esc(p.processor_label)}</title>
 <style>body{font:13px/1.45 system-ui,sans-serif;color:#111;background:#fff;margin:24px;max-width:960px}h1{font-size:20px}h2{font-size:15px;margin-top:22px;border-bottom:1px solid #999}
 table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{width:32%;background:#f4f4f4}
-.mono{font-family:ui-monospace,monospace;word-break:break-all}.warn{border:2px solid #b00;padding:8px}</style></head><body>
+.mono{font-family:ui-monospace,monospace;word-break:break-all}.warn{border:2px solid #b00;padding:8px}
+.real{color:#1d4ed8}.sample{color:#c2410c}.unsp{color:#555}.miss{display:inline-block;border:1px dashed #555;color:#555;padding:0 4px;font-size:11px;font-weight:700;text-transform:uppercase}
+.legend{border:1px solid #999;padding:6px 8px;margin:8px 0}.tone-record{border-left:5px solid #1d4ed8;padding-left:8px}.tone-sample{border-left:5px solid #c2410c;padding-left:8px}</style></head><body>
+<div class="legend"><p><b class="real">Blue</b> = real data from the transaction record. <b class="sample">Orange</b> = sample data — what we would receive from merchant dispute records when the store is connected.</p><p><span class="miss">Missing</span> = not in the record; each missing item says where to obtain it.</p></div>
+${p.sample ? `<p class="warn sample"><b>${esc(SAMPLE_LABEL)}</b></p>` : ''}
 <h1>Evidence pack — ${esc(p.processor_label)} format</h1>
 <p>Order ${esc(p.order_ref ?? '–')} · Receipt ${esc(p.receipt_ref)} · Merchant ${esc(p.merchant)}</p>
 <p><b>${esc(p.disclaimer)}</b></p>
@@ -59,7 +65,7 @@ ${p.claim.code_flag ? `<tr><th>Flag</th><td>${esc(p.claim.code_flag)}</td></tr>`
 <p>${esc(p.texts.explanation)}</p><p><i>${esc(p.text_label)}</i></p>
 <h2>Claim vs record</h2><table><tr><th>Element</th><td><b>What the claim concerns · Record · Result</b></td></tr>${p.claim_vs_record
     .map((e) => `<tr><th>${esc(e.element)}</th><td>${esc(e.claim)} · ${esc(e.record)} · <b>${esc(RESULT[e.result])}</b></td></tr>`).join('')}</table>
-${p.sections.map((s) => `<h2>${esc(s.title)}</h2>${s.items.length ? `<table>${items(s.items)}</table>` : ''}${s.verdict ? verdict(s.verdict) : ''}${s.footer ? `<p>${esc(s.footer)}</p>` : ''}${s.key === 'merchant_review' ? `<p>${esc(p.merchant_review_statement)}</p>` : ''}`).join('\n')}
+${p.sections.map((s) => `<h2 class="tone-${s.tone ?? 'record'}">${esc(s.title)}</h2>${s.items.length ? `<table>${items(s.items)}</table>` : ''}${s.verdict ? verdict(s.verdict) : ''}${s.footer ? `<p>${esc(s.footer)}</p>` : ''}${s.key === 'merchant_review' ? `<p>${esc(p.merchant_review_statement)}</p>` : ''}`).join('\n')}
 <h2>Missing documents checklist</h2>${p.needs.length ? `<table><tr><th>Item</th><td><b>Why · Where to obtain it</b></td></tr>${p.needs
     .map((n) => `<tr><th>${esc(n.item)}${n.merchant_input ? ' (merchant input required)' : ''}</th><td>${esc(n.why)} · ${esc(n.obtain_from)}</td></tr>`).join('')}</table>` : '<p>No item missing for this format.</p>'}
 <h2>Rules and deadlines</h2><ul>${p.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>

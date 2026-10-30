@@ -121,6 +121,9 @@ export type Dispute = {
   dispute_date?: string | null
   dispute_amount_cents?: number | null
   processor_reference?: string | null
+  // Only on the in-memory sample example (src/dashboard/sampleDispute.ts); never a stored column.
+  sample?: boolean
+  card_last4_or_token?: string | null
 }
 
 // Layer 1 shipment / delivery record. Carrier, tracking and delivery proof stay null when not in the order system.

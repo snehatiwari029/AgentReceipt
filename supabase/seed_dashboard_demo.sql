@@ -404,11 +404,11 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '6e4fe786-d78a-4b6e-a667-0b5b485e54a0'::uuid,
   'pack_generated',
   'AgentReceipt (pack builder)',
-  '{"generated_at":"2026-10-30T16:01:00.000Z","pack_hash":"sha256:aa21f4928cbc918497d0a956f74b24e33795b5768977989ca8943c2fc588867a","processor":"visa","text_source":"rules-fallback","texts":null}'::jsonb,
+  '{"generated_at":"2026-10-30T16:01:00.000Z","pack_hash":"sha256:1da69ff943cce83c2744015a3eab326f4a8261f9f58bce397d80e29c04451f8f","processor":"visa","text_source":"rules-fallback","texts":null}'::jsonb,
   '2026-10-30T16:01:00.000Z'::timestamptz,
   15,
   'sha256:649e8ef6491ee6b110ffcb2d6dd68e8d4d347aa54f2d06bd831eaefeac19c01b',
-  'sha256:b38f3f50186eb765c82bcb3a99aaa219515a628c77c817419f4bf08927880a08'
+  'sha256:81eb23b182d166b426572044b1f0b593bc052fc25ff1fad2f3a9217b8cae2058'
 );
 
 insert into dispute_events (id, dispute_id, event_type, decided_by, basis, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -419,8 +419,8 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '{"date":"2026-11-01","reason":null,"recorded_at":"2026-11-01T15:00:00.000Z"}'::jsonb,
   '2026-11-01T15:00:00.000Z'::timestamptz,
   16,
-  'sha256:b38f3f50186eb765c82bcb3a99aaa219515a628c77c817419f4bf08927880a08',
-  'sha256:8c0abf4cfb63b7e6d3307e72579fa8de6820f6dcf3df8011cf3043ba5acb6b70'
+  'sha256:81eb23b182d166b426572044b1f0b593bc052fc25ff1fad2f3a9217b8cae2058',
+  'sha256:d1c11ffe4a9ad5beb42c7f6742dc69f39d6d9fdc395b70af5ba8db07c0e9cd3b'
 );
 
 insert into dispute_events (id, dispute_id, event_type, decided_by, basis, created_at, chain_seq, prev_hash, entry_hash) values (
@@ -431,8 +431,8 @@ insert into dispute_events (id, dispute_id, event_type, decided_by, basis, creat
   '{"date":"2026-11-02","reason":null,"recorded_at":"2026-11-02T15:00:00.000Z"}'::jsonb,
   '2026-11-02T15:00:00.000Z'::timestamptz,
   17,
-  'sha256:8c0abf4cfb63b7e6d3307e72579fa8de6820f6dcf3df8011cf3043ba5acb6b70',
-  'sha256:739a605661ba77c3491fd8f6b2af24527a20007c241a2cd3dd3b849880268b6a'
+  'sha256:d1c11ffe4a9ad5beb42c7f6742dc69f39d6d9fdc395b70af5ba8db07c0e9cd3b',
+  'sha256:cb55223fbb642cf1b96084fd9a25493b23a0def8b0e1f6f09ae33cb41ee4c6a8'
 );
 
 -- The next chained entry gets chain_seq 18.

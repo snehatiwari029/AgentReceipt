@@ -2,12 +2,13 @@
 // Actions: scan (also the re-scan behind Scan Now), decide (approve / reject one suggestion), approve_all.
 // Writes with the service role, to optimizer_scans and optimizer_suggestions only. It never writes a listing.
 // Deployed with verify_jwt = false: the demo dashboard calls it with the publishable key (not a JWT), like shopper-agent.
-// Secrets: MODEL_API_KEY (Spark; without it every listing is labelled rules-fallback), STORE_PAGE_URL (the shop page
+// Secrets: MODEL_API_KEY (Spark; without it every listing is labelled rules-fallback and Agent Read-Test is unavailable), STORE_PAGE_URL (the shop page
 // whose HTML-as-served is checked for Schema.org markup; without it Pillar 3 shows "Not checked").
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { approveAll, decide, runScan } from './run.ts'
 import { createOptimizerDb, fetchStoreMarkup } from './store.ts'
 import { createSparkListingReader } from './spark.ts'
+import { createSparkAgentReader } from './readtest.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -31,6 +32,7 @@ Deno.serve(async (req) => {
     const deps = {
       db: createOptimizerDb(createClient(url, serviceKey, { auth: { persistSession: false } })),
       reader: createSparkListingReader(Deno.env.get('MODEL_API_KEY')),
+      agent: createSparkAgentReader(Deno.env.get('MODEL_API_KEY')),
       fetchMarkup: () => fetchStoreMarkup(Deno.env.get('STORE_PAGE_URL')),
       now: () => new Date(),
       newId: () => crypto.randomUUID(),

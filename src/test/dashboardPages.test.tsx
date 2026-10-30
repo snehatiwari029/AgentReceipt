@@ -11,7 +11,7 @@ vi.mock('../shared/supabase', () => ({ supabase: fakeClient }))
 
 import AppRoutes from '../app/AppRoutes'
 import { runScan } from '../../supabase/functions/optimizer/run'
-import { BURTON, NW, world } from './optimizerFixtures'
+import { BURTON, NW, scriptedAgent, world } from './optimizerFixtures'
 import type { Receipt } from '../shared/schemas'
 
 // Test only: the rows the seed script generates are served by the fake database,
@@ -519,8 +519,8 @@ describe('Dashboard pages with the seeded rows (read live from the tables)', () 
 describe('Optimization for Agents', () => {
   const NORTHWIND = { data: [{ id: NW, name: 'Northwind Outfitters' }], error: null }
   // A real scan, run by the optimizer's own code over the test copy of the 9 Northwind rows, served as table rows.
-  async function scanned() {
-    const w = world()
+  async function scanned(opts: Parameters<typeof world>[0] = {}) {
+    const w = world(opts)
     await runScan({ merchant_id: NW }, w.deps)
     mock.tables = {
       merchants: NORTHWIND,
@@ -583,7 +583,7 @@ describe('Optimization for Agents', () => {
 
   it('shows no Order check linkage: no order numbers, mismatch counts, "linked to" tags or caused-mismatch filter', async () => {
     const user = userEvent.setup()
-    await scanned()
+    await scanned({ agent: scriptedAgent() }) // with Agent read-test answers on the page too
     open('/dashboard/optimization')
     await screen.findAllByTestId('optimizer-listing')
     for (const b of screen.getAllByRole('button', { name: 'Show checklist and fixes' })) await user.click(b) // open every listing
@@ -667,6 +667,49 @@ describe('Optimization for Agents', () => {
     const card = (t: string) => cards.find((el) => el.textContent?.includes(t))!
     expect(card('vs formal terms').textContent).not.toContain('Re-scan')
     expect(card('No Schema.org Product').textContent).toContain(`Re-scan (${new Date('2026-10-29T03:45:00+00:00').toLocaleString()}): Still flagged on re-scan`)
+  })
+
+  it('Agent read-test is its own row group: agent answer, formal term and code result, with the line only on a mismatch', async () => {
+    const user = userEvent.setup()
+    await scanned({ agent: scriptedAgent() })
+    open('/dashboard/optimization')
+    const [spell, orca] = await screen.findAllByTestId('optimizer-listing')
+    const group = within(spell).getByRole('region', { name: 'Agent read-test' })
+    expect(within(group).getByText('Agent read-test')).toBeInTheDocument()
+    // Separate from the pillar checklist and from the suggested fixes.
+    const checklist = within(spell).getByRole('table', { name: 'Pillar 1–5 checklist' })
+    expect(checklist.contains(group)).toBe(false)
+    expect(within(group).queryByTestId('optimizer-suggestion')).not.toBeInTheDocument()
+    const returns = within(group).getByTestId('read-test-returns')
+    expect(within(returns).getAllByRole('cell').map((c) => c.textContent)).toEqual([
+      'Can this be returned?', 'Yes, easy returnsQuote: "Easy returns."', '"Final Sale"', expect.stringMatching(/^Mismatch/),
+    ])
+    expect(within(group).getAllByTestId('read-test-customer-line').map((x) => x.textContent)).toEqual([
+      'An AI agent reading your listing would tell customers "Yes, easy returns", but your terms say "Final Sale".',
+    ])
+    expect(within(group).queryByTestId('read-test-all-match')).not.toBeInTheDocument()
+    for (const k of ['delivery', 'cost', 'colour_size']) expect(within(within(group).getByTestId(`read-test-${k}`)).getAllByRole('cell')[3]).toHaveTextContent(/^Match/)
+
+    await user.click(within(orca).getByRole('button', { name: 'Show checklist and fixes' }))
+    const og = within(orca).getByRole('region', { name: 'Agent read-test' })
+    expect(within(og).getByTestId('read-test-all-match')).toHaveTextContent('Agent read-test: agent answers match formal terms.')
+    expect(within(og).queryByTestId('read-test-customer-line')).not.toBeInTheDocument()
+  })
+
+  it('Agent read-test shows "unavailable" and no invented answer when Spark is not available', async () => {
+    await scanned()
+    open('/dashboard/optimization')
+    const group = within((await screen.findAllByTestId('optimizer-listing'))[0]).getByRole('region', { name: 'Agent read-test' })
+    expect(within(group).getByTestId('read-test-unavailable')).toHaveTextContent('Agent read-test unavailable — deterministic checks only. Spark read-test unavailable (no model key).')
+    expect(within(group).queryByRole('table')).not.toBeInTheDocument()
+    expect(within(group).queryByTestId('read-test-customer-line')).not.toBeInTheDocument()
+  })
+
+  it('a scan stored before Agent read-test existed shows no read-test group', async () => {
+    const w = await scanned()
+    for (const r of w.tables.optimizer_scans[0].results as Record<string, unknown>[]) delete r.read_test
+    open('/dashboard/optimization')
+    expect(within((await screen.findAllByTestId('optimizer-listing'))[0]).queryByRole('region', { name: 'Agent read-test' })).not.toBeInTheDocument()
   })
 
   it('filters by pillar and flag type only', async () => {

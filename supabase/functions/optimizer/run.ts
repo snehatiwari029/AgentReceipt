@@ -7,6 +7,7 @@ import {
   type Flag, type ListingResult, type MarkupScan, type Row, type Semantic,
 } from './checks.ts'
 import { fallback, type ListingReader } from './spark.ts'
+import { isoDateIn, runReadTest, unavailable, type AgentReader } from './readtest.ts'
 
 export type Status = 'pending' | 'approved' | 'rejected' | 'resolved' | 'still_flagged'
 
@@ -50,6 +51,7 @@ export interface OptimizerDb {
 export interface Deps {
   db: OptimizerDb
   reader: ListingReader
+  agent: AgentReader // Agent Read-Test: its own blind Spark call (readtest.ts), never shown the formal terms
   fetchMarkup: () => Promise<MarkupScan>
   now: () => Date
   newId: () => string
@@ -57,7 +59,7 @@ export interface Deps {
 
 export type Reply =
   | { type: 'error'; message: string }
-  | { type: 'scan'; scan_id: string; listings_scanned: number; flags: number; resolved: number; still_flagged: number; markup_status: string; spark: Record<string, number> }
+  | { type: 'scan'; scan_id: string; listings_scanned: number; flags: number; resolved: number; still_flagged: number; markup_status: string; spark: Record<string, number>; read_test: Record<string, number> }
   | { type: 'decision'; suggestion_id: string; status: Status }
   | { type: 'approve_all'; approved: number; skipped_unfilled: number; skipped_not_pending: number }
 
@@ -93,6 +95,11 @@ export async function runScan(body: Record<string, unknown>, deps: Deps): Promis
 
   const results: ListingResult[] = rows.map((r, i) =>
     checkListing(r, { merchantName: merchant.name, catalogue: rows, markup, semantic: semantics[i] }))
+  // Agent Read-Test runs beside the pillars and never feeds them: no flag, suggestion or pillar result depends on it.
+  const today = isoDateIn(deps.now())
+  const readTests = await Promise.all(rows.map((r) => runReadTest(r, deps.agent, today).catch(() => unavailable(r, today, 'Spark read-test unavailable (call failed).'))))
+  const readTest: Record<string, number> = {}
+  for (const t of readTests) readTest[t.source] = (readTest[t.source] ?? 0) + 1
 
   const scanId = deps.newId()
   const at = deps.now().toISOString()
@@ -107,7 +114,7 @@ export async function runScan(body: Record<string, unknown>, deps: Deps): Promis
     catalogue_source: 'Supabase catalogue snapshot (demo; not live Shopify sync)',
     markup: { status: markup.status, url: markup.url, http_status: markup.http_status, bytes: markup.bytes, products_found: markup.products.length, has_microdata_product: markup.has_microdata_product, has_breadcrumbs: markup.has_breadcrumbs, has_faq: markup.has_faq, error: markup.error },
     spark,
-    results: results.map(({ flags, ...rest }) => ({ ...rest, flag_keys: flags.map((f) => f.key) })),
+    results: results.map(({ flags, ...rest }, i) => ({ ...rest, flag_keys: flags.map((f) => f.key), read_test: readTests[i] })),
   })
 
   const existing = await deps.db.suggestions(merchantId)
@@ -165,7 +172,7 @@ export async function runScan(body: Record<string, unknown>, deps: Deps): Promis
 
   return {
     type: 'scan', scan_id: scanId, listings_scanned: rows.length, flags: results.reduce((n, r) => n + r.flags.length, 0),
-    resolved, still_flagged: stillFlagged, markup_status: markup.status, spark,
+    resolved, still_flagged: stillFlagged, markup_status: markup.status, spark, read_test: readTest,
   }
 }
 

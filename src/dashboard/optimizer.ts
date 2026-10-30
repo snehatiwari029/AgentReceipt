@@ -1,5 +1,6 @@
 import type { ListingResult } from '../../supabase/functions/optimizer/checks'
 import type { Reply, SuggestionRow } from '../../supabase/functions/optimizer/run'
+import type { ReadTest } from '../../supabase/functions/optimizer/readtest'
 
 // The Optimization page writes through one place: the optimizer edge function (publishable key only, like the phone
 // screen). The function records decisions in its own tables; nothing here or there writes a listing.
@@ -28,7 +29,8 @@ export async function callOptimizer(body: OptimizerRequest): Promise<Reply> {
 
 // Rows as stored by the function (supabase/012_listing_optimizer.sql).
 export type Suggestion = SuggestionRow & { created_at?: string; updated_at?: string }
-export type ScanListing = Omit<ListingResult, 'flags'> & { flag_keys: string[] }
+// read_test is absent on scans stored before Agent Read-Test existed.
+export type ScanListing = Omit<ListingResult, 'flags'> & { flag_keys: string[]; read_test?: ReadTest }
 export type Scan = {
   id: string
   merchant_id: string

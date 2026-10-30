@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useRows } from '../data'
 import { Card, Empty, Live, PageTitle } from '../components/Panel'
 import { CATEGORY_LABELS, PILLAR_NAMES, type Category, type Pillar, type PillarResult } from '../../../supabase/functions/optimizer/checks'
+import { RESULT_LABEL, type ReadResult, type ReadTest } from '../../../supabase/functions/optimizer/readtest'
 import { callOptimizer, filledIn, rankSuggestions, STATUS_LABEL, type Scan, type ScanListing, type Suggestion } from '../optimizer'
 
 // The dashboard is Northwind's (demo sign-in). Everything below is filtered to this merchant.
@@ -302,6 +303,7 @@ function ListingDetail({ listing, suggestions, merchantId, onChanged }: { listin
           ))}
         </tbody>
       </table>
+      {listing.read_test && <AgentReadTest test={listing.read_test} />}
       <div>
         <p className="font-semibold text-dash-ink">Suggested fixes, highest impact first</p>
         <ul className="mt-2 flex flex-col gap-3">
@@ -309,6 +311,60 @@ function ListingDetail({ listing, suggestions, merchantId, onChanged }: { listin
         </ul>
       </div>
     </div>
+  )
+}
+
+const READ_STYLE: Record<ReadResult, string> = { match: 'text-dash-teal', mismatch: 'text-dash-violation', not_stated: 'text-dash-label' }
+
+// Agent read-test: its own row group, apart from the pillar checklist and the fixes. It never adds a flag or a fix.
+// Agent answers come from a blind Spark read of the displayed listing; formal terms come from the catalogue; code decides
+// the result. The two are shown in separate columns so an agent answer is never read as part of the terms.
+function AgentReadTest({ test }: { test: ReadTest }) {
+  return (
+    <section aria-label="Agent read-test" data-testid="agent-read-test" className="rounded-lg border border-dash-edge p-3">
+      <p className="font-semibold text-dash-ink">Agent read-test</p>
+      <p className="mt-1 text-xs text-dash-label">
+        A shopping agent read this listing as shoppers see it, without your formal terms, and answered four fixed questions.
+        Code compared each answer with your formal terms. Nothing here changes your listing.
+      </p>
+      {test.source !== 'muse-spark' ? (
+        <p className="mt-2 text-sm text-dash-attention" data-testid="read-test-unavailable">{test.label}. {test.reason}</p>
+      ) : (
+        <>
+          <table className="mt-2 w-full text-left text-sm">
+            <thead className="text-xs text-dash-label">
+              <tr><th className="py-1 pr-3">Question</th><th className="py-1 pr-3">Agent answer</th><th className="py-1 pr-3">Formal term</th><th className="py-1">Result (code)</th></tr>
+            </thead>
+            <tbody>
+              {test.questions.map((x) => (
+                <tr key={x.key} className="border-t border-dash-edge align-top" data-testid={`read-test-${x.key}`}>
+                  <td className="py-2 pr-3 text-dash-ink">{x.question}</td>
+                  <td className="py-2 pr-3">
+                    <p className="text-dash-ink">{x.agent_answer}</p>
+                    {x.agent_quotes.map((qt) => <p key={qt} className="text-xs text-dash-label">Quote: "{qt}"</p>)}
+                    {x.agent_detail && <p className="text-xs text-dash-label">{x.agent_detail}</p>}
+                  </td>
+                  <td className="py-2 pr-3 text-dash-body">{x.formal_term}</td>
+                  <td className="py-2">
+                    <p className={`font-bold ${READ_STYLE[x.result]}`}>{RESULT_LABEL[x.result]}</p>
+                    <p className="text-xs text-dash-label">{x.code_note}</p>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ul className="mt-2 flex flex-col gap-1 text-sm">
+            {test.questions.filter((x) => x.customer_line).map((x) => (
+              <li key={x.key} className="text-dash-violation" data-testid="read-test-customer-line">{x.customer_line}</li>
+            ))}
+            {test.summary && <li className="text-dash-teal" data-testid="read-test-all-match">{test.summary}</li>}
+          </ul>
+          {test.dropped.length > 0 && (
+            <p className="mt-2 text-xs text-dash-label">Removed by the quote check (not in the displayed listing): {test.dropped.join('; ')}.</p>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 

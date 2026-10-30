@@ -1,6 +1,7 @@
 // TEST fixtures only, for the Listing Optimizer tests. The app contains no product data: it reads the products table.
 import { parseMarkup, type MarkupScan, type Row } from '../../supabase/functions/optimizer/checks'
 import { createSparkListingReader, type ListingReader } from '../../supabase/functions/optimizer/spark'
+import { createSparkAgentReader, type AgentReader } from '../../supabase/functions/optimizer/readtest'
 import type { Deps, OptimizerDb, SuggestionRow } from '../../supabase/functions/optimizer/run'
 
 // TEST data only: a copy of the 9 Northwind rows as read from the live products table on 2026-10-29.
@@ -33,7 +34,7 @@ export const SPA_HTML = '<!doctype html><html><head><title>AgentReceipt</title><
 export const SPA = parseMarkup(SPA_HTML, 'https://store.test/shop', 200)
 
 // An in-memory database that plays the optimizer's tables, plus another merchant that must never show up.
-export function world(opts: { rows?: Row[]; reader?: ListingReader; markup?: () => MarkupScan } = {}) {
+export function world(opts: { rows?: Row[]; reader?: ListingReader; agent?: AgentReader; markup?: () => MarkupScan } = {}) {
   const products: Row[] = [...(opts.rows ?? northwind()), p('11111111-1111-4111-8111-111111111111', { merchant_id: OTHER, name: 'Other Board', brand: 'Other' })]
   const tables = { optimizer_suggestions: [] as SuggestionRow[], optimizer_scans: [] as Record<string, unknown>[] }
   const writes: string[] = []
@@ -51,10 +52,34 @@ export function world(opts: { rows?: Row[]; reader?: ListingReader; markup?: () 
     async insertScan(row) { writes.push('optimizer_scans'); tables.optimizer_scans.push(row) },
   }
   const deps: Deps = {
-    db, reader: opts.reader ?? createSparkListingReader(null), fetchMarkup: async () => (opts.markup ? opts.markup() : SPA),
+    db, reader: opts.reader ?? createSparkListingReader(null), agent: opts.agent ?? createSparkAgentReader(null), fetchMarkup: async () => (opts.markup ? opts.markup() : SPA),
     now: () => new Date('2026-10-29T10:00:00Z'), newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
   }
   const find = (product: string, key: string) => tables.optimizer_suggestions.find((s) => s.product_id === product && s.flag_key === key)!
   return { products, tables, writes, deps, find }
 }
 
+
+// TEST only: a scripted stand-in for the blind Spark shopping agent. Like the real call it sees only what it is sent
+// (the displayed listing and today's date), so changing the fixture blurb changes its answer. It repeats a returns
+// claim from the copy, as a hasty agent does, and prices the standard option.
+export const scriptedAgent = (seen: unknown[] = []): AgentReader => ({
+  async read(input) {
+    seen.push(input)
+    const l = input.listing
+    const blurb = l.marketing_blurb ?? ''
+    const claim = blurb.split(/(?<=[.!?])\s+/).find((s) => /return|final\s*sale/i.test(s)) ?? null
+    const days = Number(l.shipping.standard.match(/(\d+) day/)![1])
+    const [y, m, d] = input.today.split('-').map(Number)
+    const colour = l.product_details.split(' · ')[1] ?? null
+    return {
+      ok: true,
+      raw: {
+        returns: claim ? { answer: /final|no return/i.test(claim) ? 'No, final sale' : 'Yes, easy returns', quote: claim } : { answer: 'Not stated in listing', quote: null },
+        delivery: { answer: `In ${days} days standard`, option: 'standard', days, date: new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10), quote: l.shipping.standard },
+        cost: { answer: `${l.price} with free standard shipping`, option: 'standard', option_reason: 'free option shown', item_price: l.price, shipping_cost: 'Free', total: l.price, item_quote: l.price, shipping_quote: l.shipping.standard },
+        colour_size: { answer: colour ? `${colour}, ${l.product_details.split('cm')[0]} cm` : `${l.product_details.split('cm')[0]} cm`, colour, size: `${l.product_details.split('cm')[0]} cm`, quote: l.product_details },
+      },
+    }
+  },
+})
